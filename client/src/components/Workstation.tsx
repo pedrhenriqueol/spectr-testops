@@ -311,7 +311,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
                   {latestRun.assertions?.map((ast, idx) => (
                     <div key={ast.id} className="flex items-start gap-2">
                       <span className="text-slate-600 select-none w-5 text-right">{idx + 1}.</span>
-                      {ast.statusMatch && ast.slaPassed ? (
+                      {ast.statusMatch ? (
                         <span className="text-spectr-terminal font-bold">✔</span>
                       ) : (
                         <span className="text-spectr-rose font-bold">✖</span>
@@ -329,7 +329,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
                         {ast.actualStatus} HTTP
                       </span>
                       <span className="text-slate-500">•</span>
-                      <span className={ast.slaPassed ? 'text-purple-400' : 'text-spectr-rose font-bold'}>
+                      <span className={ast.slaPassed ? 'text-purple-400' : 'text-amber-400'}>
                         {ast.latencyMs}ms
                       </span>
                       
