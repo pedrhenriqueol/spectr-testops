@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Plus, Sparkles } from 'lucide-react';
+import { X } from 'lucide-react';
 
 interface CreateSuiteModalProps {
   isOpen: boolean;
@@ -40,26 +40,26 @@ export const CreateSuiteModal: React.FC<CreateSuiteModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-      <div className="bg-[#121420] border border-white/[0.08] w-full max-w-lg rounded-2xl p-6 shadow-2xl relative">
-        <div className="flex items-center justify-between pb-3 border-b border-white/[0.08]">
-          <h3 className="font-bold text-white text-base">Nova Suíte de Testes</h3>
+      <div className="bg-spectr-surface border border-spectr-border w-full max-w-lg rounded-lg p-6 shadow-2xl relative font-sans">
+        <div className="flex items-center justify-between pb-3 border-b border-spectr-border">
+          <h3 className="font-bold text-white text-sm uppercase tracking-wider font-mono">Nova Suíte de Testes</h3>
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={handleFillDemo}
-              className="px-2.5 py-1 bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/30 text-purple-300 text-[11px] font-medium rounded-lg transition-all cursor-pointer font-mono"
+              className="px-2.5 py-1 bg-spectr-violet/20 hover:bg-spectr-violet/30 border border-spectr-violet/40 text-purple-300 text-[11px] font-medium rounded transition-all cursor-pointer font-mono"
             >
               Preencher Demo
             </button>
             <button onClick={onClose} className="text-slate-400 hover:text-white">
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4" />
             </button>
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="mt-4 space-y-4 text-xs">
+        <form onSubmit={handleSubmit} className="mt-4 space-y-3.5 text-xs">
           <div>
-            <label className="block font-semibold text-slate-300 mb-1 uppercase tracking-wider">
+            <label className="block font-semibold text-slate-300 mb-1 uppercase tracking-wider font-mono text-[11px]">
               Nome da Suíte *
             </label>
             <input
@@ -68,12 +68,12 @@ export const CreateSuiteModal: React.FC<CreateSuiteModalProps> = ({
               placeholder="Ex: Pagamentos & Liquidação"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full px-3 py-2 bg-[#090A0F] border border-white/[0.08] rounded-xl text-white placeholder-slate-600 focus:outline-none focus:border-purple-500"
+              className="w-full px-3 py-2 bg-spectr-bg border border-spectr-border rounded text-white placeholder-slate-600 focus:outline-none focus:border-spectr-violet font-mono"
             />
           </div>
 
           <div>
-            <label className="block font-semibold text-slate-300 mb-1 uppercase tracking-wider">
+            <label className="block font-semibold text-slate-300 mb-1 uppercase tracking-wider font-mono text-[11px]">
               Base URL da API *
             </label>
             <input
@@ -82,12 +82,12 @@ export const CreateSuiteModal: React.FC<CreateSuiteModalProps> = ({
               placeholder="http://localhost:3335/api/v1"
               value={baseUrl}
               onChange={(e) => setBaseUrl(e.target.value)}
-              className="w-full px-3 py-2 bg-[#090A0F] border border-white/[0.08] rounded-xl text-white placeholder-slate-600 focus:outline-none focus:border-purple-500 font-mono"
+              className="w-full px-3 py-2 bg-spectr-bg border border-spectr-border rounded text-white placeholder-slate-600 focus:outline-none focus:border-spectr-violet font-mono"
             />
           </div>
 
           <div>
-            <label className="block font-semibold text-slate-300 mb-1 uppercase tracking-wider">
+            <label className="block font-semibold text-slate-300 mb-1 uppercase tracking-wider font-mono text-[11px]">
               Descrição do Escopo
             </label>
             <textarea
@@ -95,7 +95,7 @@ export const CreateSuiteModal: React.FC<CreateSuiteModalProps> = ({
               placeholder="Bateria de validação de latência p95 e conformidade de schemas..."
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="w-full px-3 py-2 bg-[#090A0F] border border-white/[0.08] rounded-xl text-white placeholder-slate-600 focus:outline-none focus:border-purple-500"
+              className="w-full px-3 py-2 bg-spectr-bg border border-spectr-border rounded text-white placeholder-slate-600 focus:outline-none focus:border-spectr-violet font-mono"
             />
           </div>
 
@@ -103,14 +103,14 @@ export const CreateSuiteModal: React.FC<CreateSuiteModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 bg-white/[0.04] text-slate-300 rounded-xl hover:bg-white/[0.08]"
+              className="px-4 py-1.5 bg-spectr-panel text-slate-300 rounded hover:bg-spectr-panelHover font-mono"
             >
               Cancelar
             </button>
             <button
               type="submit"
               disabled={loading}
-              className="px-5 py-2 bg-purple-600 hover:bg-purple-500 text-white font-semibold rounded-xl"
+              className="px-5 py-1.5 bg-spectr-violet hover:bg-spectr-violetHover text-white font-semibold rounded font-mono"
             >
               {loading ? 'Salvando...' : 'Criar Suíte'}
             </button>

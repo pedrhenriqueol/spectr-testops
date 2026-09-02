@@ -8,21 +8,17 @@ export default {
   theme: {
     extend: {
       colors: {
-        obsidian: {
-          DEFAULT: '#090A0F',     // Dark Obsidian base
-          elevated: '#0D0F18',    // Deep surface
-          card: '#121420',        // Deep Graphite Card
-          cardHover: '#171A29',
-          border: 'rgba(255, 255, 255, 0.08)',
-          borderSubtle: 'rgba(255, 255, 255, 0.04)',
-        },
-        violet: {
-          electric: '#8B5CF6',
-          laser: '#7C3AED',
-          glow: 'rgba(139, 92, 246, 0.15)'
-        },
-        laser: {
-          green: '#10B981',
+        spectr: {
+          bg: '#08090C',         // Ultra-deep charcoal base
+          surface: '#0E1017',    // Deep surface
+          panel: '#11141F',      // Workstation panels
+          panelHover: '#161A29', // Hover state
+          border: '#1E2333',     // Precision borders
+          borderLight: '#283046',
+          violet: '#7C3AED',     // Cyber violet accent
+          violetHover: '#6D28D9',
+          violetGlow: 'rgba(124, 58, 237, 0.2)',
+          terminal: '#10B981',   // Laser terminal green
           amber: '#F59E0B',
           rose: '#EF4444'
         }

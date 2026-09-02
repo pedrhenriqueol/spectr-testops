@@ -1,14 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { api } from './api/client';
 import { TestSuite, TestRun, OverviewMetrics } from './types';
-import { Navbar } from './components/Navbar';
-import { Dashboard } from './components/Dashboard';
-import { TestRunner } from './components/TestRunner';
-import { ChaosPlayground } from './components/ChaosPlayground';
+import { Sidebar } from './components/Sidebar';
+import { WorkbenchHeader } from './components/WorkbenchHeader';
+import { Workstation } from './components/Workstation';
+import { ChaosLab } from './components/ChaosLab';
+import { AuditLedger } from './components/AuditLedger';
 import { CreateSuiteModal } from './components/CreateSuiteModal';
 
 export const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'runner' | 'chaos'>('dashboard');
+  const [activeView, setActiveView] = useState<'workstation' | 'chaos' | 'ledger'>('workstation');
   const [suites, setSuites] = useState<TestSuite[]>([]);
   const [selectedSuite, setSelectedSuite] = useState<TestSuite | null>(null);
   const [runs, setRuns] = useState<TestRun[]>([]);
@@ -36,7 +37,6 @@ export const App: React.FC = () => {
       const fetchedRuns = runsRes.data.runs || [];
       setRuns(fetchedRuns);
       if (fetchedRuns.length > 0 && !latestRun) {
-        // Carrega asserções detalhadas da primeira execução
         const detailRes = await api.get(`/runs/${fetchedRuns[0].id}`);
         setLatestRun(detailRes.data.run);
       }
@@ -59,7 +59,6 @@ export const App: React.FC = () => {
       const res = await api.post(`/suites/${suiteId}/run`);
       const runResult = res.data;
 
-      // Carrega os detalhes com as asserções completas
       const detailRes = await api.get(`/runs/${runResult.runId}`);
       setLatestRun(detailRes.data.run);
 
@@ -75,7 +74,7 @@ export const App: React.FC = () => {
     try {
       const detailRes = await api.get(`/runs/${runId}`);
       setLatestRun(detailRes.data.run);
-      setActiveTab('runner');
+      setActiveView('workstation');
     } catch (err) {
       console.error(err);
     }
@@ -88,53 +87,69 @@ export const App: React.FC = () => {
 
   const handleRunDemo = async () => {
     if (suites.length > 0) {
-      setActiveTab('runner');
+      setActiveView('workstation');
       await handleRunSuite(suites[0].id);
     }
   };
 
   return (
-    <div className="min-h-screen bg-[#090A0F] text-slate-100 flex flex-col selection:bg-purple-600/30 selection:text-purple-200">
-      <Navbar
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
+    <div className="h-screen w-screen bg-spectr-bg text-slate-100 flex overflow-hidden">
+      
+      {/* 1. Left Narrow Tool Rail (Sidebar) */}
+      <Sidebar
+        activeView={activeView}
+        setActiveView={setActiveView}
         onRunDemo={handleRunDemo}
         isExecuting={isExecuting}
       />
 
-      <main className="flex-1 p-6 lg:p-8">
-        {activeTab === 'dashboard' && (
-          <Dashboard
-            metrics={metrics}
-            runs={runs}
-            loading={loading}
-            onSelectRun={handleSelectRun}
-            onNavigateToRunner={() => setActiveTab('runner')}
-          />
-        )}
+      {/* 2. Main Workstation Area */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        
+        {/* Workbench Top Bar */}
+        <WorkbenchHeader
+          selectedSuite={selectedSuite}
+          latestRun={latestRun}
+          isExecuting={isExecuting}
+          onRunSuite={() => selectedSuite && handleRunSuite(selectedSuite.id)}
+          onOpenCreateModal={() => setIsCreateModalOpen(true)}
+        />
 
-        {activeTab === 'runner' && (
-          <TestRunner
-            suites={suites}
-            selectedSuite={selectedSuite}
-            onSelectSuite={setSelectedSuite}
-            onRunSuite={handleRunSuite}
-            latestRun={latestRun}
-            isExecuting={isExecuting}
-            onOpenCreateModal={() => setIsCreateModalOpen(true)}
-          />
-        )}
+        {/* Dynamic View Panel */}
+        <div className="flex-1 flex overflow-hidden">
+          {activeView === 'workstation' && (
+            <Workstation
+              suites={suites}
+              selectedSuite={selectedSuite}
+              onSelectSuite={setSelectedSuite}
+              onRunSuite={handleRunSuite}
+              latestRun={latestRun}
+              isExecuting={isExecuting}
+              onOpenCreateModal={() => setIsCreateModalOpen(true)}
+            />
+          )}
 
-        {activeTab === 'chaos' && (
-          <ChaosPlayground />
-        )}
-      </main>
+          {activeView === 'chaos' && (
+            <ChaosLab />
+          )}
 
+          {activeView === 'ledger' && (
+            <AuditLedger
+              runs={runs}
+              onSelectRun={handleSelectRun}
+            />
+          )}
+        </div>
+
+      </div>
+
+      {/* Modal de Criação de Suíte */}
       <CreateSuiteModal
         isOpen={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
         onSubmit={handleCreateSuite}
       />
+
     </div>
   );
 };
