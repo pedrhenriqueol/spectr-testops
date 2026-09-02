@@ -26,6 +26,7 @@ interface WorkstationProps {
   latestRun: TestRun | null;
   isExecuting: boolean;
   onOpenCreateModal: () => void;
+  onOpenCreateEndpointModal: () => void;
 }
 
 export const Workstation: React.FC<WorkstationProps> = ({
@@ -35,7 +36,8 @@ export const Workstation: React.FC<WorkstationProps> = ({
   onRunSuite,
   latestRun,
   isExecuting,
-  onOpenCreateModal
+  onOpenCreateModal,
+  onOpenCreateEndpointModal
 }) => {
   const [search, setSearch] = useState('');
   const [selectedCase, setSelectedCase] = useState<TestCase | null>(null);
@@ -84,13 +86,25 @@ export const Workstation: React.FC<WorkstationProps> = ({
               <Layers className="w-3.5 h-3.5 text-purple-400" />
               Coleções & Suítes
             </span>
-            <button
-              onClick={onOpenCreateModal}
-              className="p-1 rounded bg-spectr-panel hover:bg-spectr-panelHover border border-spectr-border text-slate-300 hover:text-white transition-colors text-[11px] flex items-center gap-1 font-mono cursor-pointer"
-            >
-              <Plus className="w-3 h-3" />
-              <span>Nova</span>
-            </button>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={onOpenCreateEndpointModal}
+                disabled={!selectedSuite}
+                title="Adicionar Endpoint à Suíte Atual"
+                className="px-2 py-1 rounded bg-spectr-violet/20 hover:bg-spectr-violet/30 border border-spectr-violet/50 text-purple-200 transition-colors text-[11px] flex items-center gap-1 font-mono cursor-pointer disabled:opacity-40"
+              >
+                <Plus className="w-3 h-3" />
+                <span>Endpoint</span>
+              </button>
+              <button
+                onClick={onOpenCreateModal}
+                title="Criar Nova Suíte de Testes"
+                className="p-1 rounded bg-spectr-panel hover:bg-spectr-panelHover border border-spectr-border text-slate-300 hover:text-white transition-colors text-[11px] flex items-center gap-1 font-mono cursor-pointer"
+              >
+                <Plus className="w-3 h-3" />
+                <span>Suíte</span>
+              </button>
+            </div>
           </div>
 
           {/* Search Box */}

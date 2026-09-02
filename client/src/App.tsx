@@ -7,6 +7,7 @@ import { Workstation } from './components/Workstation';
 import { ChaosLab } from './components/ChaosLab';
 import { AuditLedger } from './components/AuditLedger';
 import { CreateSuiteModal } from './components/CreateSuiteModal';
+import { CreateEndpointModal } from './components/CreateEndpointModal';
 
 export const App: React.FC = () => {
   const [activeView, setActiveView] = useState<'workstation' | 'chaos' | 'ledger'>('workstation');
@@ -18,6 +19,7 @@ export const App: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [isExecuting, setIsExecuting] = useState(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isCreateEndpointModalOpen, setIsCreateEndpointModalOpen] = useState(false);
 
   const loadData = async () => {
     try {
@@ -85,6 +87,12 @@ export const App: React.FC = () => {
     await loadData();
   };
 
+  const handleCreateEndpoint = async (data: any) => {
+    if (!selectedSuite) return;
+    await api.post(`/suites/${selectedSuite.id}/cases`, data);
+    await loadData();
+  };
+
   const handleRunDemo = async () => {
     if (suites.length > 0) {
       setActiveView('workstation');
@@ -126,6 +134,7 @@ export const App: React.FC = () => {
               latestRun={latestRun}
               isExecuting={isExecuting}
               onOpenCreateModal={() => setIsCreateModalOpen(true)}
+              onOpenCreateEndpointModal={() => setIsCreateEndpointModalOpen(true)}
             />
           )}
 
@@ -148,6 +157,14 @@ export const App: React.FC = () => {
         isOpen={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
         onSubmit={handleCreateSuite}
+      />
+
+      {/* Modal de Criação de Endpoint */}
+      <CreateEndpointModal
+        isOpen={isCreateEndpointModalOpen}
+        suiteName={selectedSuite?.name || ''}
+        onClose={() => setIsCreateEndpointModalOpen(false)}
+        onSubmit={handleCreateEndpoint}
       />
 
     </div>
