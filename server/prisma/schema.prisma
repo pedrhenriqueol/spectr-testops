@@ -1,0 +1,107 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Workspace {
+  id        String      @id @default(uuid())
+  name      String
+  slug      String      @unique
+  apiKey    String      @unique
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @updatedAt @map("updated_at")
+
+  suites    TestSuite[]
+  runs      TestRun[]
+
+  @@map("workspaces")
+}
+
+model TestSuite {
+  id          String     @id @default(uuid())
+  workspaceId String     @map("workspace_id")
+  name        String
+  description String?
+  baseUrl     String     @map("base_url")
+  headers     String?    // JSON String de headers globais
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+
+  workspace   Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  cases       TestCase[]
+  runs        TestRun[]
+
+  @@map("test_suites")
+}
+
+model TestCase {
+  id             String          @id @default(uuid())
+  suiteId        String          @map("suite_id")
+  name           String
+  method         String          // GET, POST, PUT, DELETE, PATCH
+  path           String
+  headers        String?         // JSON String
+  body           String?         // JSON String
+  expectedStatus Int             @default(200) @map("expected_status")
+  maxLatencyMs   Int             @default(500) @map("max_latency_ms")
+  expectedSchema String?         @map("expected_schema") // JSON Schema em string
+  orderIndex     Int             @default(0) @map("order_index")
+  active         Boolean         @default(true)
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
+
+  suite          TestSuite       @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+  assertions     TestAssertion[]
+
+  @@map("test_cases")
+}
+
+model TestRun {
+  id              String          @id @default(uuid())
+  workspaceId     String          @map("workspace_id")
+  suiteId         String          @map("suite_id")
+  status          String          @default("PENDING") // PENDING, RUNNING, PASSED, FAILED
+  totalTests      Int             @default(0) @map("total_tests")
+  passedTests     Int             @default(0) @map("passed_tests")
+  failedTests     Int             @default(0) @map("failed_tests")
+  totalDurationMs Int             @default(0) @map("total_duration_ms")
+  p95LatencyMs    Int             @default(0) @map("p95_latency_ms")
+  p99LatencyMs    Int             @default(0) @map("p99_latency_ms")
+  successRate     Float           @default(0.0) @map("success_rate")
+  triggeredBy     String          @default("MANUAL") @map("triggered_by")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  completedAt     DateTime?       @map("completed_at")
+
+  workspace       Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  suite           TestSuite       @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+  assertions      TestAssertion[]
+
+  @@map("test_runs")
+}
+
+model TestAssertion {
+  id           String    @id @default(uuid())
+  runId        String    @map("run_id")
+  caseId       String    @map("case_id")
+  name         String
+  method       String
+  endpoint     String
+  actualStatus Int       @map("actual_status")
+  expectedStatus Int     @map("expected_status")
+  statusMatch  Boolean   @default(false) @map("status_match")
+  latencyMs    Int       @default(0) @map("latency_ms")
+  slaPassed    Boolean   @default(false) @map("sla_passed")
+  schemaValid  Boolean   @default(true) @map("schema_valid")
+  errorMessage String?   @map("error_message")
+  responseBody String?   @map("response_body")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  run          TestRun   @relation(fields: [runId], references: [id], onDelete: Cascade)
+  testCase     TestCase  @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@map("test_assertions")
+}
