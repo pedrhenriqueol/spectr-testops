@@ -90,3 +90,24 @@ export interface OverviewMetrics {
     createdAt: string;
   }>;
 }
+
+export interface SingleResponse {
+  caseId: string;
+  name: string;
+  method: HttpMethod;
+  url: string;
+  actualStatus: number;
+  statusText?: string;
+  statusMatch: boolean;
+  expectedStatus: number;
+  latencyMs: number;
+  slaPassed: boolean;
+  maxLatencyMs: number;
+  schemaValid: boolean;
+  responseHeaders: Record<string, string>;
+  responseBody: any;
+  rawBody: string;
+  responseSize: string;
+  errorMessage?: string | null;
+  timestamp: string;
+}

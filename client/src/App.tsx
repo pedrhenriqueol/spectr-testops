@@ -17,6 +17,7 @@ function MainApp() {
   const [runsHistory, setRunsHistory] = useState<TestRun[]>([]);
   const [activeView, setActiveView] = useState<'workstation' | 'chaos' | 'history'>('workstation');
   const [environment, setEnvironment] = useState('production');
+  const [searchQuery, setSearchQuery] = useState('');
   const [isExecuting, setIsExecuting] = useState(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isCreateEndpointModalOpen, setIsCreateEndpointModalOpen] = useState(false);
@@ -110,6 +111,8 @@ function MainApp() {
         onRunDemo={handleRunDemo}
         environment={environment}
         setEnvironment={setEnvironment}
+        searchQuery={searchQuery}
+        setSearchQuery={setSearchQuery}
       />
 
       {/* 2. Main Workstation Area */}
@@ -133,6 +136,8 @@ function MainApp() {
                 onOpenCreateModal={() => setIsCreateModalOpen(true)}
                 onOpenCreateEndpointModal={() => setIsCreateEndpointModalOpen(true)}
                 onUpdateBaseUrl={handleUpdateBaseUrl}
+                searchQuery={searchQuery}
+                setSearchQuery={setSearchQuery}
               />
             </motion.div>
           )}

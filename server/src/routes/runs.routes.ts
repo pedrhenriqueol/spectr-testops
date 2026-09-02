@@ -1,10 +1,19 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../shared/prisma.js';
-import { executeTestSuite } from '../engine/runner.js';
+import { executeTestSuite, executeSingleTestCase } from '../engine/runner.js';
 import { AppError } from '../shared/errors/AppError.js';
 
 export async function runsRoutes(app: FastifyInstance) {
+  // Dispara a execução de um ÚNICO caso de teste (Single Request Runner)
+  app.post('/cases/:id/run', async (request, reply) => {
+    const paramsSchema = z.object({ id: z.string().uuid() });
+    const { id: caseId } = paramsSchema.parse(request.params);
+
+    const result = await executeSingleTestCase(caseId);
+    return reply.status(200).send(result);
+  });
+
   // Dispara a execução de uma suíte de testes
   app.post('/suites/:id/run', async (request, reply) => {
     const paramsSchema = z.object({ id: z.string().uuid() });

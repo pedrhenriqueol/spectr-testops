@@ -1,11 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Plus, Search, Play, CheckCircle2, XCircle, Clock, Shield, 
   Terminal, Copy, Check, FileJson, Key, Sliders, AlertTriangle, 
   ChevronRight, ChevronDown, Folder, Code, Send, Sparkles, Layers,
-  ExternalLink, Edit3
+  ExternalLink, Edit3, Download, FileSpreadsheet, FileCode
 } from 'lucide-react';
-import { TestSuite, TestCase, TestRun, HttpMethod } from '../types';
+import { TestSuite, TestCase, TestRun, HttpMethod, SingleResponse } from '../types';
+import { api } from '../api/client';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface WorkstationProps {
@@ -18,7 +19,29 @@ interface WorkstationProps {
   onOpenCreateModal: () => void;
   onOpenCreateEndpointModal: () => void;
   onUpdateBaseUrl?: (newUrl: string) => Promise<void>;
+  searchQuery?: string;
+  setSearchQuery?: (q: string) => void;
 }
+
+// Helper para destacar termos pesquisados na listagem
+const HighlightText: React.FC<{ text: string; query: string }> = ({ text, query }) => {
+  if (!query.trim()) return <span>{text}</span>;
+  const regex = new RegExp(`(${query.replace(/[-[\]{}()*+?.,\\\^$|#\s]/g, '\\$&')})`, 'gi');
+  const parts = text.split(regex);
+  return (
+    <span>
+      {parts.map((part, i) =>
+        regex.test(part) ? (
+          <mark key={i} className="bg-pm-orange/30 text-pm-orange dark:text-orange-300 font-bold px-0.5 rounded">
+            {part}
+          </mark>
+        ) : (
+          <span key={i}>{part}</span>
+        )
+      )}
+    </span>
+  );
+};
 
 export const Workstation: React.FC<WorkstationProps> = ({
   suites,
@@ -29,24 +52,37 @@ export const Workstation: React.FC<WorkstationProps> = ({
   isExecuting,
   onOpenCreateModal,
   onOpenCreateEndpointModal,
-  onUpdateBaseUrl
+  onUpdateBaseUrl,
+  searchQuery = '',
+  setSearchQuery
 }) => {
   const [selectedCase, setSelectedCase] = useState<TestCase | null>(null);
-  const [search, setSearch] = useState('');
-  const [activeRequestTab, setActiveRequestTab] = useState<'params' | 'headers' | 'body' | 'assertions' | 'schema'>('assertions');
-  const [activeResponseTab, setActiveResponseTab] = useState<'cli' | 'assertions' | 'responseBody'>('cli');
+  const [localSearch, setLocalSearch] = useState('');
+  const [activeRequestTab, setActiveRequestTab] = useState<'assertions' | 'headers' | 'body' | 'schema'>('assertions');
+  
+  // Single Request Runner State
+  const [singleResponse, setSingleResponse] = useState<SingleResponse | null>(null);
+  const [isSendingSingle, setIsSendingSingle] = useState(false);
+  const [responseMode, setResponseMode] = useState<'single' | 'collection'>('single');
+  const [activeSingleTab, setActiveSingleTab] = useState<'body' | 'tests' | 'headers'>('body');
+  const [activeCollectionTab, setActiveCollectionTab] = useState<'cli' | 'breakdown'>('cli');
+
   const [copied, setCopied] = useState(false);
   const [isEditingUrl, setIsEditingUrl] = useState(false);
   const [editedUrl, setEditedUrl] = useState('');
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
+
+  // Termo de busca unificado (do Topbar ou local)
+  const activeQuery = searchQuery || localSearch;
 
   // Sincroniza caso ativo quando muda de suíte
   const activeCases = selectedSuite?.cases || [];
   const currentCase = selectedCase || (activeCases.length > 0 ? activeCases[0] : null);
 
   const filteredCases = activeCases.filter(c => 
-    c.name.toLowerCase().includes(search.toLowerCase()) ||
-    c.path.toLowerCase().includes(search.toLowerCase()) ||
-    c.method.toLowerCase().includes(search.toLowerCase())
+    c.name.toLowerCase().includes(activeQuery.toLowerCase()) ||
+    c.path.toLowerCase().includes(activeQuery.toLowerCase()) ||
+    c.method.toLowerCase().includes(activeQuery.toLowerCase())
   );
 
   const handleCopy = (text: string) => {
@@ -60,6 +96,110 @@ export const Workstation: React.FC<WorkstationProps> = ({
       await onUpdateBaseUrl(editedUrl.trim());
       setIsEditingUrl(false);
     }
+  };
+
+  // Disparo Individual de Request (Send Button)
+  const handleSendSingle = async () => {
+    if (!currentCase) return;
+    try {
+      setIsSendingSingle(true);
+      const res = await api.post(`/cases/${currentCase.id}/run`);
+      setSingleResponse(res.data);
+      setResponseMode('single');
+    } catch (err: any) {
+      console.error('Falha na execução individual:', err);
+    } finally {
+      setIsSendingSingle(false);
+    }
+  };
+
+  // Exportação de Relatório de Conformidade (SLA Report)
+  const handleExportReport = (format: 'json' | 'csv') => {
+    const reportTimestamp = new Date().toISOString();
+    const suiteName = selectedSuite?.name || 'Spectr-Suite';
+    const cleanSuiteName = suiteName.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+    if (format === 'json') {
+      const reportData = {
+        title: 'SPECTR TestOps SLA & API Compliance Technical Report',
+        generatedAt: reportTimestamp,
+        suite: {
+          id: selectedSuite?.id,
+          name: selectedSuite?.name,
+          baseUrl: selectedSuite?.baseUrl
+        },
+        execution: latestRun ? {
+          runId: latestRun.id,
+          status: latestRun.status,
+          successRate: `${latestRun.successRate}%`,
+          passedTests: latestRun.passedTests,
+          failedTests: latestRun.failedTests,
+          totalTests: latestRun.totalTests,
+          p95LatencyMs: latestRun.p95LatencyMs,
+          p99LatencyMs: latestRun.p99LatencyMs,
+          totalDurationMs: latestRun.totalDurationMs,
+          assertions: latestRun.assertions
+        } : null,
+        activeSingleResponse: singleResponse
+      };
+
+      const blob = new Blob([JSON.stringify(reportData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `spectr-sla-report-${cleanSuiteName}-${Date.now()}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } else {
+      // CSV Format
+      const headers = ['Test Name', 'Method', 'Endpoint', 'HTTP Status', 'Expected Status', 'Status Match', 'Latency (ms)', 'SLA Target (ms)', 'SLA Passed', 'Schema Valid', 'Result', 'Error Message'];
+      const rows: string[][] = [];
+
+      if (latestRun?.assertions) {
+        latestRun.assertions.forEach(ast => {
+          rows.push([
+            `"${ast.name.replace(/"/g, '""')}"`,
+            ast.method,
+            ast.endpoint,
+            String(ast.actualStatus),
+            String(ast.expectedStatus),
+            ast.statusMatch ? 'PASS' : 'FAIL',
+            String(ast.latencyMs),
+            '1500',
+            ast.slaPassed ? 'YES' : 'NO',
+            ast.schemaValid ? 'YES' : 'NO',
+            ast.statusMatch ? 'PASS' : 'FAIL',
+            `"${(ast.errorMessage || '').replace(/"/g, '""')}"`
+          ]);
+        });
+      } else if (singleResponse) {
+        rows.push([
+          `"${singleResponse.name.replace(/"/g, '""')}"`,
+          singleResponse.method,
+          singleResponse.url,
+          String(singleResponse.actualStatus),
+          String(singleResponse.expectedStatus),
+          singleResponse.statusMatch ? 'PASS' : 'FAIL',
+          String(singleResponse.latencyMs),
+          String(singleResponse.maxLatencyMs),
+          singleResponse.slaPassed ? 'YES' : 'NO',
+          singleResponse.schemaValid ? 'YES' : 'NO',
+          singleResponse.statusMatch ? 'PASS' : 'FAIL',
+          `"${(singleResponse.errorMessage || '').replace(/"/g, '""')}"`
+        ]);
+      }
+
+      const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `spectr-sla-report-${cleanSuiteName}-${Date.now()}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    setIsExportMenuOpen(false);
   };
 
   const getMethodBadgeClass = (method: string) => {
@@ -85,7 +225,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
   };
 
   return (
-    <div className="flex-1 flex overflow-hidden bg-pm-light-bg dark:bg-pm-dark-bg transition-colors duration-200">
+    <div className="flex-1 flex overflow-hidden bg-pm-light-bg dark:bg-pm-dark-bg transition-colors duration-200 select-none">
       
       {/* ── COLUNA ESQUERDA (320px): POSTMAN COLLECTIONS SIDEBAR ── */}
       <div className="w-80 bg-pm-light-sidebar dark:bg-pm-dark-sidebar border-r border-pm-light-border dark:border-pm-dark-border flex flex-col shrink-0">
@@ -118,16 +258,24 @@ export const Workstation: React.FC<WorkstationProps> = ({
             </div>
           </div>
 
-          {/* Search Box */}
+          {/* Search Box com feedback de correspondências */}
           <div className="relative">
             <Search className="w-3.5 h-3.5 text-pm-light-textMuted dark:text-pm-dark-textMuted absolute left-2.5 top-1/2 -translate-y-1/2" />
             <input
               type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Filter requests..."
-              className="w-full pl-8 pr-3 py-1 bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border rounded text-[11px] text-pm-light-text dark:text-pm-dark-text placeholder-pm-light-textMuted dark:placeholder-pm-dark-textMuted focus:outline-none focus:border-pm-orange"
+              value={activeQuery}
+              onChange={(e) => {
+                setLocalSearch(e.target.value);
+                if (setSearchQuery) setSearchQuery(e.target.value);
+              }}
+              placeholder="Filtrar por nome, rota ou método..."
+              className="w-full pl-8 pr-12 py-1.5 bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border rounded text-[11px] text-pm-light-text dark:text-pm-dark-text placeholder-pm-light-textMuted dark:placeholder-pm-dark-textMuted focus:outline-none focus:border-pm-orange"
             />
+            {activeQuery && (
+              <span className="absolute right-2 top-1/2 -translate-y-1/2 px-1 rounded bg-pm-orange/20 text-pm-orange text-[9px] font-mono font-bold">
+                {filteredCases.length}
+              </span>
+            )}
           </div>
         </div>
 
@@ -146,7 +294,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
                   : 'bg-pm-light-panel dark:bg-pm-dark-panel border-pm-light-border dark:border-pm-dark-border text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-light-text dark:hover:text-pm-dark-text'
               }`}
             >
-              {s.name.split('──')[0].trim()}
+              <HighlightText text={s.name.split('──')[0].trim()} query={activeQuery} />
             </button>
           ))}
         </div>
@@ -159,17 +307,21 @@ export const Workstation: React.FC<WorkstationProps> = ({
               <div className="px-2 py-1.5 rounded flex items-center justify-between text-xs font-semibold text-pm-light-text dark:text-pm-dark-text mb-1">
                 <div className="flex items-center gap-1.5 truncate">
                   <ChevronDown className="w-3.5 h-3.5 text-pm-light-textMuted dark:text-pm-dark-textMuted" />
-                  <span className="truncate">{selectedSuite.name}</span>
+                  <span className="truncate">
+                    <HighlightText text={selectedSuite.name} query={activeQuery} />
+                  </span>
                 </div>
                 <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border text-pm-light-textMuted dark:text-pm-dark-textMuted">
                   {filteredCases.length}
                 </span>
               </div>
 
-              {/* Request Items */}
+              {/* Request Items com Destaque de Busca */}
               <div className="pl-3 space-y-0.5">
                 {filteredCases.length === 0 ? (
-                  <p className="py-4 text-center text-xs text-pm-light-textMuted dark:text-pm-dark-textMuted">No requests match search.</p>
+                  <p className="py-4 text-center text-xs text-pm-light-textMuted dark:text-pm-dark-textMuted">
+                    Nenhum request coincide com a busca.
+                  </p>
                 ) : (
                   filteredCases.map((c) => {
                     const isCurrent = currentCase?.id === c.id;
@@ -186,9 +338,11 @@ export const Workstation: React.FC<WorkstationProps> = ({
                       >
                         <div className="flex items-center gap-2 truncate min-w-0">
                           <span className={`font-mono text-[10px] font-bold w-9 uppercase shrink-0 ${getMethodTextClass(c.method)}`}>
-                            {c.method}
+                            <HighlightText text={c.method} query={activeQuery} />
                           </span>
-                          <span className="truncate text-[11px] font-mono">{c.name}</span>
+                          <span className="truncate text-[11px] font-mono">
+                            <HighlightText text={c.name} query={activeQuery} />
+                          </span>
                         </div>
                         <span className="text-[10px] font-mono text-pm-light-textMuted dark:text-pm-dark-textMuted shrink-0">
                           {c.maxLatencyMs}ms
@@ -200,23 +354,23 @@ export const Workstation: React.FC<WorkstationProps> = ({
               </div>
             </div>
           ) : (
-            <p className="p-4 text-center text-xs text-pm-light-textMuted dark:text-pm-dark-textMuted">Select a collection.</p>
+            <p className="p-4 text-center text-xs text-pm-light-textMuted dark:text-pm-dark-textMuted">Selecione uma coleção.</p>
           )}
         </div>
 
         {/* Sidebar Footer */}
         <div className="p-2.5 border-t border-pm-light-border dark:border-pm-dark-border bg-pm-light-panel dark:bg-pm-dark-panel flex items-center justify-between text-[10px] font-mono text-pm-light-textMuted dark:text-pm-dark-textMuted">
-          <span>{filteredCases.length} endpoints</span>
+          <span>{filteredCases.length} endpoints prontos</span>
           <span className="text-pm-orange font-medium">Postman Engine v10</span>
         </div>
 
       </div>
 
 
-      {/* ── COLUNA PRINCIPAL: POSTMAN REQUEST WORKBENCH & RESPONSE PANE ── */}
+      {/* ── COLUNA PRINCIPAL: REQUEST WORKBENCH & RESPONSE PANE ── */}
       <div className="flex-1 flex flex-col overflow-hidden">
         
-        {/* 1. Request Address Bar & HTTP Method Row */}
+        {/* 1. Request Address Bar & Send Button */}
         <div className="p-3 border-b border-pm-light-border dark:border-pm-dark-border bg-pm-light-surface dark:bg-pm-dark-surface flex items-center gap-2">
           {currentCase ? (
             <>
@@ -226,27 +380,27 @@ export const Workstation: React.FC<WorkstationProps> = ({
               </div>
 
               {/* URL Address Bar */}
-              <div className="flex-1 flex items-center bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border rounded px-3 py-1.5 text-xs font-mono">
+              <div className="flex-1 flex items-center bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border rounded px-3 py-1.5 text-xs font-mono overflow-hidden">
                 <span className="text-pm-light-textMuted dark:text-pm-dark-textMuted shrink-0">
                   {selectedSuite?.baseUrl.replace(/\/+$/, '')}
                 </span>
-                <span className="text-pm-orange font-semibold">{currentCase.path}</span>
+                <span className="text-pm-orange font-semibold truncate">{currentCase.path}</span>
               </div>
 
-              {/* Send Button */}
+              {/* Send Button (Disparo Individual com spinner) */}
               <motion.button
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
-                onClick={() => selectedSuite && onRunSuite(selectedSuite.id)}
-                disabled={isExecuting}
+                onClick={handleSendSingle}
+                disabled={isSendingSingle || isExecuting}
                 className="px-4 py-1.5 bg-pm-orange hover:bg-pm-orangeHover disabled:opacity-50 text-white font-semibold rounded text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer font-sans"
               >
-                <Send className="w-3.5 h-3.5" />
-                <span>Send</span>
+                <Send className={`w-3.5 h-3.5 ${isSendingSingle ? 'animate-spin' : ''}`} />
+                <span>{isSendingSingle ? 'Sending...' : 'Send'}</span>
               </motion.button>
             </>
           ) : (
-            <span className="text-xs text-pm-light-textMuted dark:text-pm-dark-textMuted">No request selected</span>
+            <span className="text-xs text-pm-light-textMuted dark:text-pm-dark-textMuted">Nenhuma requisição selecionada</span>
           )}
         </div>
 
@@ -281,14 +435,14 @@ export const Workstation: React.FC<WorkstationProps> = ({
             </div>
 
             <div className="flex items-center gap-3 text-pm-light-textMuted dark:text-pm-dark-textMuted">
-              <span>Expected Status: <strong className="text-emerald-500 font-bold">{currentCase?.expectedStatus || 200} OK</strong></span>
+              <span>Status Esperado: <strong className="text-emerald-500 font-bold">{currentCase?.expectedStatus || 200} OK</strong></span>
               <span>•</span>
               <span>SLA Target: <strong className="text-pm-orange">{currentCase?.maxLatencyMs || 250}ms</strong></span>
             </div>
           </div>
         )}
 
-        {/* 3. Request Settings Tabs (Params, Headers, Body, Assertions, Schema) */}
+        {/* 3. Request Settings Tabs (Assertions, Headers, Body, Schema) */}
         <div className="border-b border-pm-light-border dark:border-pm-dark-border bg-pm-light-surface dark:bg-pm-dark-surface px-3 flex items-center gap-1 text-xs">
           {[
             { id: 'assertions', label: 'Assertions & SLA', count: 2 },
@@ -318,7 +472,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
         </div>
 
         {/* 4. Request Configuration Viewport */}
-        <div className="h-44 p-3 bg-pm-light-bg dark:bg-pm-dark-bg border-b border-pm-light-border dark:border-pm-dark-border overflow-y-auto text-xs font-mono">
+        <div className="h-40 p-3 bg-pm-light-bg dark:bg-pm-dark-bg border-b border-pm-light-border dark:border-pm-dark-border overflow-y-auto text-xs font-mono">
           <AnimatePresence mode="wait">
             {activeRequestTab === 'assertions' && (
               <motion.div
@@ -388,7 +542,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
                     })()}
                   </pre>
                 ) : (
-                  <p className="text-pm-light-textMuted dark:text-pm-dark-textMuted py-4 text-center">No JSON payload body configured for this request.</p>
+                  <p className="text-pm-light-textMuted dark:text-pm-dark-textMuted py-4 text-center">Nenhum payload JSON configurado para este request.</p>
                 )}
               </motion.div>
             )}
@@ -404,7 +558,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
                     {currentCase.expectedSchema}
                   </pre>
                 ) : (
-                  <p className="text-pm-light-textMuted dark:text-pm-dark-textMuted py-4 text-center">Automatic schema verification enabled (validates 200 OK structure).</p>
+                  <p className="text-pm-light-textMuted dark:text-pm-dark-textMuted py-4 text-center">Validação automática de contrato ativo (status 200 OK).</p>
                 )}
               </motion.div>
             )}
@@ -412,165 +566,403 @@ export const Workstation: React.FC<WorkstationProps> = ({
         </div>
 
 
-        {/* 5. Response Pane & Postman Test Runner Stream */}
+        {/* 5. Postman Response Pane (Single Request Response & Collection Runner Stream) */}
         <div className="flex-1 flex flex-col min-h-0 bg-pm-light-surface dark:bg-pm-dark-surface">
           
           {/* Response Pane Header Bar */}
           <div className="h-10 bg-pm-light-sidebar dark:bg-pm-dark-sidebar border-b border-pm-light-border dark:border-pm-dark-border px-3 flex items-center justify-between text-xs shrink-0">
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setActiveResponseTab('cli')}
-                className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer ${
-                  activeResponseTab === 'cli'
-                    ? 'bg-pm-orange text-white font-semibold shadow-sm'
-                    : 'text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-light-text dark:hover:text-pm-dark-text'
-                }`}
-              >
-                Test Results Console
-              </button>
-              <button
-                onClick={() => setActiveResponseTab('assertions')}
-                className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer ${
-                  activeResponseTab === 'assertions'
-                    ? 'bg-pm-orange text-white font-semibold shadow-sm'
-                    : 'text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-light-text dark:hover:text-pm-dark-text'
-                }`}
-              >
-                Test Breakdown ({latestRun?.assertions?.length || 0})
-              </button>
+            
+            {/* Left: Mode Switcher & Tabs */}
+            <div className="flex items-center gap-2">
+              
+              {/* Selector de Modo: Single Request vs Collection Stream */}
+              <div className="flex items-center bg-pm-light-bg dark:bg-pm-dark-bg p-0.5 rounded border border-pm-light-border dark:border-pm-dark-border">
+                <button
+                  onClick={() => setResponseMode('single')}
+                  className={`px-2.5 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                    responseMode === 'single'
+                      ? 'bg-pm-orange text-white shadow-sm'
+                      : 'text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-light-text dark:hover:text-pm-dark-text'
+                  }`}
+                >
+                  ⚡ Single Response
+                </button>
+                <button
+                  onClick={() => setResponseMode('collection')}
+                  className={`px-2.5 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                    responseMode === 'collection'
+                      ? 'bg-pm-orange text-white shadow-sm'
+                      : 'text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-light-text dark:hover:text-pm-dark-text'
+                  }`}
+                >
+                  📋 Collection Runner
+                </button>
+              </div>
+
+              {/* Sub-tabs dependendo do modo ativo */}
+              {responseMode === 'single' ? (
+                <div className="flex items-center gap-1 pl-2 border-l border-pm-light-border dark:border-pm-dark-border">
+                  <button
+                    onClick={() => setActiveSingleTab('body')}
+                    className={`px-2.5 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer ${
+                      activeSingleTab === 'body'
+                        ? 'text-pm-orange font-bold underline'
+                        : 'text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-light-text dark:hover:text-pm-dark-text'
+                    }`}
+                  >
+                    Body (JSON Pretty)
+                  </button>
+                  <button
+                    onClick={() => setActiveSingleTab('tests')}
+                    className={`px-2.5 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer ${
+                      activeSingleTab === 'tests'
+                        ? 'text-pm-orange font-bold underline'
+                        : 'text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-light-text dark:hover:text-pm-dark-text'
+                    }`}
+                  >
+                    Test Results
+                  </button>
+                  <button
+                    onClick={() => setActiveSingleTab('headers')}
+                    className={`px-2.5 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer ${
+                      activeSingleTab === 'headers'
+                        ? 'text-pm-orange font-bold underline'
+                        : 'text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-light-text dark:hover:text-pm-dark-text'
+                    }`}
+                  >
+                    Headers ({singleResponse ? Object.keys(singleResponse.responseHeaders).length : 0})
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1 pl-2 border-l border-pm-light-border dark:border-pm-dark-border">
+                  <button
+                    onClick={() => setActiveCollectionTab('cli')}
+                    className={`px-2.5 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer ${
+                      activeCollectionTab === 'cli'
+                        ? 'text-pm-orange font-bold underline'
+                        : 'text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-light-text dark:hover:text-pm-dark-text'
+                    }`}
+                  >
+                    CLI Stream
+                  </button>
+                  <button
+                    onClick={() => setActiveCollectionTab('breakdown')}
+                    className={`px-2.5 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer ${
+                      activeCollectionTab === 'breakdown'
+                        ? 'text-pm-orange font-bold underline'
+                        : 'text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-light-text dark:hover:text-pm-dark-text'
+                    }`}
+                  >
+                    Breakdown ({latestRun?.assertions?.length || 0})
+                  </button>
+                </div>
+              )}
+
             </div>
 
-            {/* Status Metric Pills (Postman Style) */}
-            {latestRun && (
-              <div className="flex items-center gap-2 text-[11px] font-mono">
-                <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 font-bold">
-                  Status: {latestRun.passedTests}/{latestRun.totalTests} PASS ({latestRun.successRate}%)
-                </span>
-                <span className="px-2 py-0.5 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border text-pm-light-text dark:text-pm-dark-text">
-                  Time: <strong className="text-pm-orange">{latestRun.totalDurationMs}ms</strong>
-                </span>
-                <span className="px-2 py-0.5 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border text-pm-light-text dark:text-pm-dark-text">
-                  p95: <strong className="text-pm-orange">{latestRun.p95LatencyMs}ms</strong>
-                </span>
+            {/* Right: Metrics Pills & Export SLA Report Button */}
+            <div className="flex items-center gap-2 text-[11px] font-mono">
+              
+              {/* Status Pills */}
+              {responseMode === 'single' && singleResponse ? (
+                <>
+                  <span className={`px-2 py-0.5 rounded font-bold border ${
+                    singleResponse.statusMatch
+                      ? 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30'
+                      : 'bg-rose-500/15 text-rose-500 border-rose-500/30'
+                  }`}>
+                    Status: {singleResponse.actualStatus} {singleResponse.statusText}
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border text-pm-light-text dark:text-pm-dark-text">
+                    Time: <strong className="text-pm-orange">{singleResponse.latencyMs}ms</strong>
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border text-pm-light-text dark:text-pm-dark-text">
+                    Size: <strong className="text-pm-light-text dark:text-pm-dark-text">{singleResponse.responseSize}</strong>
+                  </span>
+                </>
+              ) : latestRun ? (
+                <>
+                  <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 font-bold">
+                    {latestRun.passedTests}/{latestRun.totalTests} PASS ({latestRun.successRate}%)
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border text-pm-light-text dark:text-pm-dark-text">
+                    Time: <strong className="text-pm-orange">{latestRun.totalDurationMs}ms</strong>
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border text-pm-light-text dark:text-pm-dark-text">
+                    p95: <strong className="text-pm-orange">{latestRun.p95LatencyMs}ms</strong>
+                  </span>
+                </>
+              ) : null}
+
+              {/* 4. EXPORTAÇÃO DE RELATÓRIO DE CONFORMIDADE (NOVA FEATURE) */}
+              <div className="relative">
+                <button
+                  onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
+                  title="Exportar Relatório Técnico de Conformidade SLA"
+                  className="px-2.5 py-1 rounded bg-pm-light-panel dark:bg-pm-dark-panel hover:bg-pm-orange/15 border border-pm-light-border dark:border-pm-dark-border hover:border-pm-orange/50 text-pm-light-text dark:text-pm-dark-text transition-colors flex items-center gap-1.5 font-sans text-xs font-semibold cursor-pointer"
+                >
+                  <Download className="w-3 h-3 text-pm-orange" />
+                  <span>Export SLA Report</span>
+                  <ChevronDown className="w-3 h-3 opacity-60" />
+                </button>
+
+                {isExportMenuOpen && (
+                  <div className="absolute right-0 mt-1 w-44 rounded-md bg-pm-light-surface dark:bg-pm-dark-surface border border-pm-light-border dark:border-pm-dark-border shadow-xl py-1 z-50 font-sans text-xs">
+                    <button
+                      onClick={() => handleExportReport('json')}
+                      className="w-full px-3 py-1.5 text-left flex items-center gap-2 hover:bg-pm-light-panelHover dark:hover:bg-pm-dark-panelHover text-pm-light-text dark:text-pm-dark-text transition-colors cursor-pointer"
+                    >
+                      <FileCode className="w-3.5 h-3.5 text-pm-orange" />
+                      <span>Export JSON (.json)</span>
+                    </button>
+                    <button
+                      onClick={() => handleExportReport('csv')}
+                      className="w-full px-3 py-1.5 text-left flex items-center gap-2 hover:bg-pm-light-panelHover dark:hover:bg-pm-dark-panelHover text-pm-light-text dark:text-pm-dark-text transition-colors cursor-pointer"
+                    >
+                      <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-500" />
+                      <span>Export CSV (.csv)</span>
+                    </button>
+                  </div>
+                )}
               </div>
-            )}
+
+            </div>
           </div>
 
-          {/* Response Viewport */}
+          {/* Response Viewport Content */}
           <div className="flex-1 p-3 overflow-y-auto font-mono text-xs">
             <AnimatePresence mode="wait">
               
-              {/* CLI Stream Tab */}
-              {activeResponseTab === 'cli' && (
+              {/* ── MODO 1: SINGLE REQUEST RESPONSE ── */}
+              {responseMode === 'single' && (
                 <motion.div
-                  key="cli"
+                  key="single-view"
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
-                  className="h-full rounded bg-pm-light-bg dark:bg-[#151515] border border-pm-light-border dark:border-pm-dark-border p-3 text-[11px] text-pm-light-text dark:text-slate-300 overflow-y-auto space-y-1.5 shadow-inner"
+                  className="h-full flex flex-col"
                 >
-                  <div className="text-pm-light-textMuted dark:text-slate-500 pb-2 border-b border-pm-light-border dark:border-white/[0.08] flex items-center justify-between text-[10px]">
-                    <span>POSTMAN RUNNER PROTOCOL v10.14 ── FASTIFY TEST ENGINE</span>
-                    <span>{new Date().toLocaleDateString('pt-BR')}</span>
-                  </div>
-
-                  {isExecuting ? (
-                    <div className="py-8 text-center space-y-2">
-                      <div className="inline-block w-3 h-3 rounded-full bg-pm-orange animate-ping" />
-                      <p className="text-pm-orange font-bold">Executing test collection against target server...</p>
-                      <p className="text-[10px] text-pm-light-textMuted dark:text-slate-500">Dispatching assertions, verifying JWT chain and telemetry metrics.</p>
+                  {isSendingSingle ? (
+                    <div className="py-12 text-center space-y-2">
+                      <div className="inline-block w-4 h-4 rounded-full bg-pm-orange animate-ping" />
+                      <p className="text-pm-orange font-bold">Disparando requisição individual contra o alvo...</p>
+                      <p className="text-[11px] text-pm-light-textMuted dark:text-pm-dark-textMuted">
+                        Autenticando sessão JWT, medindo latência e capturando headers de resposta.
+                      </p>
                     </div>
-                  ) : !latestRun ? (
-                    <div className="py-12 text-center text-pm-light-textMuted dark:text-slate-500 space-y-1">
-                      <Terminal className="w-8 h-8 mx-auto opacity-30" />
-                      <p>No tests executed yet.</p>
-                      <p className="text-[10px]">Click "Send" or "Run Collection" to dispatch test battery.</p>
+                  ) : !singleResponse ? (
+                    <div className="py-14 text-center text-pm-light-textMuted dark:text-pm-dark-textMuted space-y-2">
+                      <Send className="w-8 h-8 mx-auto opacity-30 text-pm-orange" />
+                      <p className="font-semibold text-pm-light-text dark:text-pm-dark-text">Nenhuma resposta individual recebida.</p>
+                      <p className="text-[11px]">Clique no botão "Send" na barra de endereço para disparar esta requisição.</p>
                     </div>
                   ) : (
-                    <div className="space-y-1.5 leading-relaxed">
-                      <p className="text-pm-light-textMuted dark:text-slate-500">
-                        [{new Date(latestRun.createdAt).toLocaleTimeString('pt-BR')}] ❯ RUNNING: "{latestRun.suite?.name}" ({latestRun.totalTests} requests)
-                      </p>
+                    <>
+                      {/* Tab 1: Pretty Body (JSON) */}
+                      {activeSingleTab === 'body' && (
+                        <div className="h-full flex flex-col rounded bg-pm-light-bg dark:bg-[#151515] border border-pm-light-border dark:border-pm-dark-border overflow-hidden shadow-inner">
+                          <div className="p-2 border-b border-pm-light-border dark:border-white/[0.08] flex items-center justify-between text-[11px] text-pm-light-textMuted dark:text-pm-dark-textMuted bg-pm-light-panel dark:bg-pm-dark-panel">
+                            <span>RESPONSE PAYLOAD (JSON PRETTY)</span>
+                            <button
+                              onClick={() => handleCopy(JSON.stringify(singleResponse.responseBody, null, 2))}
+                              className="flex items-center gap-1 text-[10px] text-pm-orange hover:underline cursor-pointer font-bold"
+                            >
+                              {copied ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                              <span>{copied ? 'Copied!' : 'Copy JSON'}</span>
+                            </button>
+                          </div>
+                          <div className="flex-1 p-3 overflow-y-auto font-mono text-[11px] text-pm-light-text dark:text-emerald-400">
+                            <pre className="whitespace-pre-wrap">
+                              {typeof singleResponse.responseBody === 'object'
+                                ? JSON.stringify(singleResponse.responseBody, null, 2)
+                                : singleResponse.rawBody}
+                            </pre>
+                          </div>
+                        </div>
+                      )}
 
-                      {latestRun.assertions?.map((ast, idx) => (
-                        <motion.div
-                          key={ast.id}
-                          initial={{ opacity: 0, x: -5 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          transition={{ delay: idx * 0.04 }}
-                          className="flex items-start gap-2 text-[11px]"
-                        >
-                          <span className="text-pm-light-textMuted dark:text-slate-600 w-4 text-right">{idx + 1}.</span>
-                          {ast.statusMatch ? (
-                            <span className="text-emerald-500 font-bold">PASS ✔</span>
-                          ) : (
-                            <span className="text-rose-500 font-bold">FAIL ✖</span>
-                          )}
-                          
-                          <span className={`font-bold uppercase ${getMethodTextClass(ast.method)}`}>
-                            [{ast.method}]
-                          </span>
+                      {/* Tab 2: Test Results */}
+                      {activeSingleTab === 'tests' && (
+                        <div className="space-y-2">
+                          <div className="p-3 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              {singleResponse.statusMatch ? (
+                                <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 text-[10px] font-bold">PASS</span>
+                              ) : (
+                                <span className="px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-500 border border-rose-500/30 text-[10px] font-bold">FAIL</span>
+                              )}
+                              <span className="font-semibold text-pm-light-text dark:text-pm-dark-text">
+                                Status code is {singleResponse.expectedStatus} OK
+                              </span>
+                            </div>
+                            <span className="font-mono text-emerald-500 font-bold">{singleResponse.actualStatus} HTTP</span>
+                          </div>
 
-                          <span className="text-pm-light-text dark:text-white font-medium">{ast.endpoint}</span>
-                          <span className="text-pm-light-textMuted dark:text-slate-500">──</span>
-                          <span className={ast.statusMatch ? 'text-emerald-500 font-bold' : 'text-rose-500'}>
-                            {ast.actualStatus} HTTP
-                          </span>
-                          <span className="text-pm-light-textMuted dark:text-slate-500">•</span>
-                          <span className={ast.slaPassed ? 'text-pm-orange' : 'text-amber-500 font-bold'}>
-                            {ast.latencyMs}ms
-                          </span>
-                          
-                          {ast.schemaValid && (
-                            <span className="text-emerald-500/80 text-[10px]">[SCHEMA_VALID]</span>
-                          )}
-                        </motion.div>
-                      ))}
+                          <div className="p-3 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              {singleResponse.slaPassed ? (
+                                <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 text-[10px] font-bold">PASS</span>
+                              ) : (
+                                <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-500 border border-amber-500/30 text-[10px] font-bold">WARN</span>
+                              )}
+                              <span className="font-semibold text-pm-light-text dark:text-pm-dark-text">
+                                Response time is within SLA threshold ({singleResponse.maxLatencyMs}ms)
+                              </span>
+                            </div>
+                            <span className="font-mono text-pm-orange font-bold">{singleResponse.latencyMs}ms</span>
+                          </div>
 
-                      <div className="pt-2 mt-2 border-t border-pm-light-border dark:border-white/[0.08] text-[11px] space-y-0.5">
-                        <p>
-                          ── RESULT: <strong className="text-emerald-500">{latestRun.passedTests}/{latestRun.totalTests} PASSED</strong> • Success Rate: <strong className="text-pm-orange">{latestRun.successRate}%</strong>
-                        </p>
-                        <p className="text-pm-light-textMuted dark:text-slate-400">
-                          ── LATENCY: p95 = <strong className="text-pm-orange">{latestRun.p95LatencyMs}ms</strong> • Total Duration: {latestRun.totalDurationMs}ms
-                        </p>
-                      </div>
-                    </div>
+                          <div className="p-3 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              {singleResponse.schemaValid ? (
+                                <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 text-[10px] font-bold">PASS</span>
+                              ) : (
+                                <span className="px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-500 border border-rose-500/30 text-[10px] font-bold">FAIL</span>
+                              )}
+                              <span className="font-semibold text-pm-light-text dark:text-pm-dark-text">
+                                Contract schema integrity verification
+                              </span>
+                            </div>
+                            <span className="font-mono text-emerald-500 font-bold">[SCHEMA_VALID]</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Tab 3: Response Headers */}
+                      {activeSingleTab === 'headers' && (
+                        <div className="rounded bg-pm-light-surface dark:bg-pm-dark-surface border border-pm-light-border dark:border-pm-dark-border overflow-hidden">
+                          <table className="w-full text-left font-mono text-[11px]">
+                            <thead className="bg-pm-light-panel dark:bg-pm-dark-panel border-b border-pm-light-border dark:border-pm-dark-border text-[10px] text-pm-light-textMuted dark:text-pm-dark-textMuted uppercase">
+                              <tr>
+                                <th className="px-4 py-2">Header Key</th>
+                                <th className="px-4 py-2">Header Value</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-pm-light-border dark:divide-pm-dark-border">
+                              {Object.entries(singleResponse.responseHeaders).map(([k, v]) => (
+                                <tr key={k} className="hover:bg-pm-light-panelHover dark:hover:bg-pm-dark-panelHover">
+                                  <td className="px-4 py-2 text-pm-orange font-bold">{k}</td>
+                                  <td className="px-4 py-2 text-pm-light-text dark:text-pm-dark-text truncate max-w-md">{v}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </>
                   )}
                 </motion.div>
               )}
 
-              {/* Assertions Tab */}
-              {activeResponseTab === 'assertions' && (
+
+              {/* ── MODO 2: COLLECTION RUNNER STREAM ── */}
+              {responseMode === 'collection' && (
                 <motion.div
-                  key="assertions"
+                  key="collection-view"
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
-                  className="space-y-2"
+                  className="h-full"
                 >
-                  {latestRun?.assertions?.map((ast) => (
-                    <div
-                      key={ast.id}
-                      className="p-2.5 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border flex items-center justify-between text-xs"
-                    >
-                      <div className="flex items-center gap-2">
-                        {ast.statusMatch ? (
-                          <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-500 text-[10px] font-bold border border-emerald-500/30">PASS</span>
-                        ) : (
-                          <span className="px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-500 text-[10px] font-bold border border-rose-500/30">FAIL</span>
-                        )}
-                        <span className={`font-mono text-[10px] font-bold uppercase ${getMethodTextClass(ast.method)}`}>[{ast.method}]</span>
-                        <span className="font-semibold text-pm-light-text dark:text-pm-dark-text">{ast.name}</span>
-                        <span className="text-pm-light-textMuted dark:text-pm-dark-textMuted font-mono text-[11px]">({ast.endpoint})</span>
+                  {activeCollectionTab === 'cli' && (
+                    <div className="h-full rounded bg-pm-light-bg dark:bg-[#151515] border border-pm-light-border dark:border-pm-dark-border p-3 text-[11px] text-pm-light-text dark:text-slate-300 overflow-y-auto space-y-1.5 shadow-inner">
+                      <div className="text-pm-light-textMuted dark:text-slate-500 pb-2 border-b border-pm-light-border dark:border-white/[0.08] flex items-center justify-between text-[10px]">
+                        <span>POSTMAN RUNNER PROTOCOL v10.14 ── FASTIFY TEST ENGINE</span>
+                        <span>{new Date().toLocaleDateString('pt-BR')}</span>
                       </div>
 
-                      <div className="flex items-center gap-3 font-mono text-[11px]">
-                        <span className="text-emerald-500 font-bold">{ast.actualStatus} HTTP</span>
-                        <span className="text-pm-orange">{ast.latencyMs}ms</span>
-                      </div>
+                      {isExecuting ? (
+                        <div className="py-8 text-center space-y-2">
+                          <div className="inline-block w-3 h-3 rounded-full bg-pm-orange animate-ping" />
+                          <p className="text-pm-orange font-bold">Executando bateria sequencial de testes contra o alvo...</p>
+                          <p className="text-[10px] text-pm-light-textMuted dark:text-slate-500">Disparando asserções, encadeamento de JWT e cálculo de percentis p95/p99.</p>
+                        </div>
+                      ) : !latestRun ? (
+                        <div className="py-12 text-center text-pm-light-textMuted dark:text-slate-500 space-y-1">
+                          <Terminal className="w-8 h-8 mx-auto opacity-30" />
+                          <p>Nenhuma bateria de coleção executada ainda.</p>
+                          <p className="text-[10px]">Clique em "Run Collection" no topo para disparar toda a suíte de testes.</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-1.5 leading-relaxed">
+                          <p className="text-pm-light-textMuted dark:text-slate-500">
+                            [{new Date(latestRun.createdAt).toLocaleTimeString('pt-BR')}] ❯ RUNNING: "{latestRun.suite?.name}" ({latestRun.totalTests} requests)
+                          </p>
+
+                          {latestRun.assertions?.map((ast, idx) => (
+                            <motion.div
+                              key={ast.id}
+                              initial={{ opacity: 0, x: -5 }}
+                              animate={{ opacity: 1, x: 0 }}
+                              transition={{ delay: idx * 0.04 }}
+                              className="flex items-start gap-2 text-[11px]"
+                            >
+                              <span className="text-pm-light-textMuted dark:text-slate-600 w-4 text-right">{idx + 1}.</span>
+                              {ast.statusMatch ? (
+                                <span className="text-emerald-500 font-bold">PASS ✔</span>
+                              ) : (
+                                <span className="text-rose-500 font-bold">FAIL ✖</span>
+                              )}
+                              
+                              <span className={`font-bold uppercase ${getMethodTextClass(ast.method)}`}>
+                                [{ast.method}]
+                              </span>
+
+                              <span className="text-pm-light-text dark:text-white font-medium">{ast.endpoint}</span>
+                              <span className="text-pm-light-textMuted dark:text-slate-500">──</span>
+                              <span className={ast.statusMatch ? 'text-emerald-500 font-bold' : 'text-rose-500'}>
+                                {ast.actualStatus} HTTP
+                              </span>
+                              <span className="text-pm-light-textMuted dark:text-slate-500">•</span>
+                              <span className={ast.slaPassed ? 'text-pm-orange' : 'text-amber-500 font-bold'}>
+                                {ast.latencyMs}ms
+                              </span>
+                              
+                              {ast.schemaValid && (
+                                <span className="text-emerald-500/80 text-[10px]">[SCHEMA_VALID]</span>
+                              )}
+                            </motion.div>
+                          ))}
+
+                          <div className="pt-2 mt-2 border-t border-pm-light-border dark:border-white/[0.08] text-[11px] space-y-0.5">
+                            <p>
+                              ── RESULT: <strong className="text-emerald-500">{latestRun.passedTests}/{latestRun.totalTests} PASSED</strong> • Success Rate: <strong className="text-pm-orange">{latestRun.successRate}%</strong>
+                            </p>
+                            <p className="text-pm-light-textMuted dark:text-slate-400">
+                              ── LATENCY: p95 = <strong className="text-pm-orange">{latestRun.p95LatencyMs}ms</strong> • Total Duration: {latestRun.totalDurationMs}ms
+                            </p>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  ))}
+                  )}
+
+                  {activeCollectionTab === 'breakdown' && (
+                    <div className="space-y-2">
+                      {latestRun?.assertions?.map((ast) => (
+                        <div
+                          key={ast.id}
+                          className="p-2.5 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border flex items-center justify-between text-xs"
+                        >
+                          <div className="flex items-center gap-2">
+                            {ast.statusMatch ? (
+                              <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-500 text-[10px] font-bold border border-emerald-500/30">PASS</span>
+                            ) : (
+                              <span className="px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-500 text-[10px] font-bold border border-rose-500/30">FAIL</span>
+                            )}
+                            <span className={`font-mono text-[10px] font-bold uppercase ${getMethodTextClass(ast.method)}`}>[{ast.method}]</span>
+                            <span className="font-semibold text-pm-light-text dark:text-pm-dark-text">{ast.name}</span>
+                            <span className="text-pm-light-textMuted dark:text-pm-dark-textMuted font-mono text-[11px]">({ast.endpoint})</span>
+                          </div>
+
+                          <div className="flex items-center gap-3 font-mono text-[11px]">
+                            <span className="text-emerald-500 font-bold">{ast.actualStatus} HTTP</span>
+                            <span className="text-pm-orange">{ast.latencyMs}ms</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </motion.div>
               )}
 

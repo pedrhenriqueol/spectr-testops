@@ -1,10 +1,10 @@
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 import { 
   Terminal, Search, Sun, Moon, Play, Layers, 
-  ChevronDown, Globe, Shield, RefreshCw, Zap, Sliders, Database
+  ChevronDown, Globe, Zap, Sliders, Database, Command
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
-import { TestSuite, TestRun } from '../types';
+import { TestSuite } from '../types';
 import { motion } from 'framer-motion';
 
 interface PostmanTopNavProps {
@@ -16,6 +16,8 @@ interface PostmanTopNavProps {
   onRunDemo: () => void;
   environment: string;
   setEnvironment: (env: string) => void;
+  searchQuery: string;
+  setSearchQuery: (query: string) => void;
 }
 
 export const PostmanTopNav: React.FC<PostmanTopNavProps> = ({
@@ -26,12 +28,29 @@ export const PostmanTopNav: React.FC<PostmanTopNavProps> = ({
   isExecuting,
   onRunDemo,
   environment,
-  setEnvironment
+  setEnvironment,
+  searchQuery,
+  setSearchQuery
 }) => {
   const { theme, toggleTheme } = useTheme();
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Shortcut Ctrl+K / Cmd+K para focar imediatamente na busca global
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   return (
-    <header className="h-12 bg-pm-light-sidebar dark:bg-pm-dark-sidebar border-b border-pm-light-border dark:border-pm-dark-border flex items-center justify-between px-3 text-xs z-30 shrink-0 transition-colors duration-200">
+    <header className="h-12 bg-pm-light-sidebar dark:bg-pm-dark-sidebar border-b border-pm-light-border dark:border-pm-dark-border flex items-center justify-between px-3 text-xs z-30 shrink-0 transition-colors duration-200 select-none">
       
       {/* ── Left: Brand & Workspace Selector ── */}
       <div className="flex items-center gap-3">
@@ -118,17 +137,25 @@ export const PostmanTopNav: React.FC<PostmanTopNavProps> = ({
         </div>
       </div>
 
-      {/* ── Center: Search Bar ── */}
-      <div className="hidden lg:flex items-center w-72 max-w-sm relative">
+      {/* ── Center: Search Bar com Atalho Ctrl+K ── */}
+      <div className="hidden lg:flex items-center w-80 max-w-sm relative">
         <Search className="w-3.5 h-3.5 absolute left-2.5 text-pm-light-textMuted dark:text-pm-dark-textMuted" />
         <input
+          ref={searchInputRef}
           type="text"
-          placeholder="Search endpoints, collections (⌘K)"
-          className="w-full pl-8 pr-3 py-1 bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border rounded text-[11px] text-pm-light-text dark:text-pm-dark-text placeholder-pm-light-textMuted dark:placeholder-pm-dark-textMuted focus:outline-none focus:border-pm-orange transition-colors"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Buscar endpoints, coleções ou métodos..."
+          className="w-full pl-8 pr-14 py-1.5 bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border rounded text-[11px] text-pm-light-text dark:text-pm-dark-text placeholder-pm-light-textMuted dark:placeholder-pm-dark-textMuted focus:outline-none focus:border-pm-orange transition-colors"
         />
+        <div className="absolute right-2 flex items-center gap-0.5 pointer-events-none">
+          <kbd className="px-1.5 py-0.5 rounded bg-pm-light-bg dark:bg-pm-dark-bg border border-pm-light-border dark:border-pm-dark-border text-[9px] font-mono text-pm-light-textMuted dark:text-pm-dark-textMuted font-semibold">
+            Ctrl+K
+          </kbd>
+        </div>
       </div>
 
-      {/* ── Right: Environment, Demo, Theme, Run Action ── */}
+      {/* ── Right: Environment, Theme Switcher, Demo, Run Collection ── */}
       <div className="flex items-center gap-2">
         
         {/* Environment Selector */}
@@ -145,6 +172,25 @@ export const PostmanTopNav: React.FC<PostmanTopNavProps> = ({
           </select>
         </div>
 
+        {/* 1. Theme Switcher Nativo (Light/Dark Postman) ao lado do Environment Selector */}
+        <button
+          onClick={toggleTheme}
+          title={theme === 'dark' ? 'Alternar para Tema Claro (Postman White)' : 'Alternar para Tema Escuro (Postman Dark)'}
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-pm-light-panel dark:bg-pm-dark-panel hover:bg-pm-light-panelHover dark:hover:bg-pm-dark-panelHover border border-pm-light-border dark:border-pm-dark-border text-pm-light-text dark:text-pm-dark-text transition-colors cursor-pointer"
+        >
+          {theme === 'dark' ? (
+            <>
+              <Sun className="w-3.5 h-3.5 text-amber-400" />
+              <span className="text-[11px] font-medium hidden xl:inline">Light</span>
+            </>
+          ) : (
+            <>
+              <Moon className="w-3.5 h-3.5 text-slate-700" />
+              <span className="text-[11px] font-medium hidden xl:inline">Dark</span>
+            </>
+          )}
+        </button>
+
         {/* 1-Click Demo Trigger */}
         <button
           onClick={onRunDemo}
@@ -155,20 +201,7 @@ export const PostmanTopNav: React.FC<PostmanTopNavProps> = ({
           <span className="hidden sm:inline">PayStream Demo</span>
         </button>
 
-        {/* Theme Switcher (Light / Dark) */}
-        <button
-          onClick={toggleTheme}
-          title={theme === 'dark' ? 'Alternar para Tema Claro' : 'Alternar para Tema Escuro'}
-          className="p-1.5 rounded bg-pm-light-panel dark:bg-pm-dark-panel hover:bg-pm-light-panelHover dark:hover:bg-pm-dark-panelHover border border-pm-light-border dark:border-pm-dark-border text-pm-light-text dark:text-pm-dark-text transition-colors cursor-pointer"
-        >
-          {theme === 'dark' ? (
-            <Sun className="w-3.5 h-3.5 text-amber-400" />
-          ) : (
-            <Moon className="w-3.5 h-3.5 text-slate-700" />
-          )}
-        </button>
-
-        {/* Primary Run Button */}
+        {/* Primary Run Collection Action */}
         <motion.button
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
