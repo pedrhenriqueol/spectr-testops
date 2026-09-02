@@ -1,14 +1,14 @@
 import React, { useState } from 'react';
+import { Sliders, Zap, AlertTriangle, Clock, RefreshCw, Terminal, Activity } from 'lucide-react';
 import { api } from '../api/client';
-import { Sliders, Zap, AlertTriangle, Clock, RefreshCw, Terminal, CheckCircle2 } from 'lucide-react';
+import { motion } from 'framer-motion';
 
 export const ChaosLab: React.FC = () => {
-  const [delay, setDelay] = useState(800);
+  const [delay, setDelay] = useState(250);
   const [errorCode, setErrorCode] = useState(503);
-  const [flakyDropRate, setFlakyDropRate] = useState(50);
+  const [loading, setLoading] = useState(false);
   const [output, setOutput] = useState<any>(null);
   const [latency, setLatency] = useState<number | null>(null);
-  const [loading, setLoading] = useState(false);
 
   const handleTestDelay = async () => {
     const start = Date.now();
@@ -54,41 +54,37 @@ export const ChaosLab: React.FC = () => {
   };
 
   return (
-    <div className="flex-1 flex flex-col p-6 max-w-7xl mx-auto w-full overflow-y-auto">
-      
-      {/* Header */}
-      <div className="mb-6">
-        <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
-          <Sliders className="w-5 h-5 text-purple-400" />
-          <span>Mesa de Injeção de Parâmetros & Engenharia de Caos</span>
-        </h2>
-        <p className="text-xs text-slate-400 mt-1">
-          Injeção de estresse em tempo real para validar circuit-breakers, retries exponenciais e resiliência de SLAs.
-        </p>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1 items-start">
+    <div className="flex-1 overflow-y-auto p-6 bg-pm-light-bg dark:bg-pm-dark-bg transition-colors duration-200">
+      <div className="max-w-4xl mx-auto space-y-6">
         
-        {/* Parameter Injection Mesa (7 cols) */}
-        <div className="lg:col-span-7 space-y-4">
+        {/* Header */}
+        <div>
+          <h2 className="text-lg font-bold text-pm-light-text dark:text-pm-dark-text flex items-center gap-2">
+            <Sliders className="w-5 h-5 text-pm-orange" />
+            Postman Chaos Engineering Lab
+          </h2>
+          <p className="text-xs text-pm-light-textMuted dark:text-pm-dark-textMuted mt-1">
+            Simule falhas de infraestrutura, alta latência de rede e intermitências controladas contra APIs e microsserviços.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           
-          {/* Rack 1: Atraso de Rede Artificial */}
-          <div className="p-4 rounded-lg bg-spectr-surface border border-spectr-border space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-white flex items-center gap-1.5 font-mono">
-                <Clock className="w-4 h-4 text-purple-400" />
-                Network Latency Injector
-              </span>
-              <span className="text-xs font-mono font-bold text-purple-300 bg-spectr-violet/20 px-2 py-0.5 rounded border border-spectr-violet/40">
-                {delay}ms
-              </span>
-            </div>
+          {/* Controls Rack */}
+          <div className="space-y-4">
+            
+            {/* 1. Injeção de Latência */}
+            <div className="p-4 rounded-lg bg-pm-light-surface dark:bg-pm-dark-surface border border-pm-light-border dark:border-pm-dark-border space-y-3 shadow-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-pm-light-text dark:text-pm-dark-text flex items-center gap-1.5">
+                  <Clock className="w-4 h-4 text-pm-orange" />
+                  Network Latency Injection
+                </span>
+                <span className="text-xs font-mono font-bold text-pm-orange px-2 py-0.5 rounded bg-pm-orange/10 border border-pm-orange/30">
+                  {delay}ms
+                </span>
+              </div>
 
-            <p className="text-[11px] text-slate-400">
-              Injeta degradação artificial de latência para testar limites de timeout de conexão e p95 da esteira.
-            </p>
-
-            <div className="space-y-1">
               <input
                 type="range"
                 min="50"
@@ -96,145 +92,126 @@ export const ChaosLab: React.FC = () => {
                 step="50"
                 value={delay}
                 onChange={(e) => setDelay(Number(e.target.value))}
-                className="w-full accent-purple-500 cursor-pointer"
+                className="w-full accent-pm-orange cursor-pointer"
               />
-              <div className="flex justify-between text-[10px] font-mono text-slate-500">
-                <span>50ms (Rápido)</span>
-                <span>800ms (Degradado)</span>
-                <span>3000ms (Near-Timeout)</span>
-              </div>
-            </div>
 
-            {/* Quick Presets */}
-            <div className="flex items-center gap-2 pt-1">
-              {[150, 500, 1200, 2500].map((preset) => (
-                <button
-                  key={preset}
-                  onClick={() => setDelay(preset)}
-                  className={`px-2 py-1 rounded text-[10px] font-mono border transition-colors cursor-pointer ${
-                    delay === preset
-                      ? 'bg-spectr-violet text-white border-spectr-violet'
-                      : 'bg-spectr-panel border-spectr-border text-slate-400 hover:text-white'
-                  }`}
-                >
-                  {preset}ms
-                </button>
-              ))}
-            </div>
-
-            <button
-              onClick={handleTestDelay}
-              disabled={loading}
-              className="w-full py-2 bg-spectr-violet hover:bg-spectr-violetHover text-white font-semibold rounded-md text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm"
-            >
-              <Zap className="w-3.5 h-3.5 fill-current" />
-              <span>Injetar Atraso de {delay}ms</span>
-            </button>
-          </div>
-
-          {/* Rack 2: Injeção de Falha HTTP */}
-          <div className="p-4 rounded-lg bg-spectr-surface border border-spectr-border space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-white flex items-center gap-1.5 font-mono">
-                <AlertTriangle className="w-4 h-4 text-rose-400" />
-                Fault Status Override
-              </span>
-              <div className="flex items-center gap-1">
-                {[503, 500, 429].map((code) => (
+              <div className="flex gap-1.5 pt-1">
+                {[100, 350, 800, 1500, 2500].map((d) => (
                   <button
-                    key={code}
-                    onClick={() => setErrorCode(code)}
-                    className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border transition-colors cursor-pointer ${
-                      errorCode === code
-                        ? 'bg-spectr-rose/20 text-rose-300 border-spectr-rose/50'
-                        : 'bg-spectr-panel text-slate-400 border-spectr-border'
-                    }`}
+                    key={d}
+                    onClick={() => setDelay(d)}
+                    className="flex-1 py-1 rounded bg-pm-light-panel dark:bg-pm-dark-panel hover:bg-pm-orange/15 border border-pm-light-border dark:border-pm-dark-border hover:border-pm-orange/50 text-[10px] font-mono text-pm-light-text dark:text-pm-dark-text transition-colors cursor-pointer"
                   >
-                    {code}
+                    {d}ms
                   </button>
                 ))}
               </div>
+
+              <button
+                onClick={handleTestDelay}
+                disabled={loading}
+                className="w-full py-2 bg-pm-orange hover:bg-pm-orangeHover disabled:opacity-50 text-white font-semibold rounded text-xs transition-all cursor-pointer font-sans"
+              >
+                Injetar Atraso de Rede
+              </button>
             </div>
 
-            <p className="text-[11px] text-slate-400">
-              Força o retorno imediato de erro de infraestrutura para testar contingências e fallback de serviço.
-            </p>
+            {/* 2. Injeção de Código de Erro */}
+            <div className="p-4 rounded-lg bg-pm-light-surface dark:bg-pm-dark-surface border border-pm-light-border dark:border-pm-dark-border space-y-3 shadow-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-pm-light-text dark:text-pm-dark-text flex items-center gap-1.5">
+                  <AlertTriangle className="w-4 h-4 text-rose-500" />
+                  Fault Status Code Override
+                </span>
+                <span className="text-xs font-mono font-bold text-rose-500 px-2 py-0.5 rounded bg-rose-500/10 border border-rose-500/30">
+                  HTTP {errorCode}
+                </span>
+              </div>
 
-            <button
-              onClick={handleTestError}
-              disabled={loading}
-              className="w-full py-2 bg-spectr-rose/15 hover:bg-spectr-rose/25 text-rose-300 border border-spectr-rose/40 font-semibold rounded-md text-xs flex items-center justify-center gap-2 transition-all cursor-pointer"
-            >
-              <AlertTriangle className="w-3.5 h-3.5" />
-              <span>Injetar Resposta HTTP {errorCode}</span>
-            </button>
-          </div>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { code: 500, label: '500 Server Error' },
+                  { code: 503, label: '503 Unavailable' },
+                  { code: 429, label: '429 Rate Limit' },
+                ].map((item) => (
+                  <button
+                    key={item.code}
+                    onClick={() => setErrorCode(item.code)}
+                    className={`py-1.5 px-2 rounded text-[11px] font-mono border transition-all cursor-pointer ${
+                      errorCode === item.code
+                        ? 'bg-rose-500 text-white border-rose-500 font-bold shadow-sm'
+                        : 'bg-pm-light-panel dark:bg-pm-dark-panel border-pm-light-border dark:border-pm-dark-border text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-light-text dark:hover:text-pm-dark-text'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
 
-          {/* Rack 3: Intermitência Flaky */}
-          <div className="p-4 rounded-lg bg-spectr-surface border border-spectr-border space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-white flex items-center gap-1.5 font-mono">
-                <RefreshCw className="w-4 h-4 text-amber-400" />
+              <button
+                onClick={handleTestError}
+                disabled={loading}
+                className="w-full py-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white font-semibold rounded text-xs transition-all cursor-pointer font-sans"
+              >
+                Disparar Falha de Infraestrutura
+              </button>
+            </div>
+
+            {/* 3. Instabilidade Estocástica */}
+            <div className="p-4 rounded-lg bg-pm-light-surface dark:bg-pm-dark-surface border border-pm-light-border dark:border-pm-dark-border space-y-3 shadow-sm">
+              <span className="text-xs font-bold text-pm-light-text dark:text-pm-dark-text flex items-center gap-1.5">
+                <RefreshCw className="w-4 h-4 text-amber-500" />
                 Stochastic Flaky Simulation
               </span>
-              <span className="text-[10px] font-mono font-bold text-amber-300 bg-amber-500/15 px-2 py-0.5 rounded border border-amber-500/40">
-                50% Drop Rate
-              </span>
+              <p className="text-[11px] text-pm-light-textMuted dark:text-pm-dark-textMuted">
+                Simula oscilações aleatórias na rota com taxa de descarte de 50%.
+              </p>
+              <button
+                onClick={handleTestFlaky}
+                disabled={loading}
+                className="w-full py-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white font-semibold rounded text-xs transition-all cursor-pointer font-sans"
+              >
+                Testar Flaky Connection
+              </button>
             </div>
 
-            <p className="text-[11px] text-slate-400">
-              Alterna estocasticamente entre sucesso e falha para validar idempotência e retry logic.
-            </p>
-
-            <button
-              onClick={handleTestFlaky}
-              disabled={loading}
-              className="w-full py-2 bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/40 font-semibold rounded-md text-xs flex items-center justify-center gap-2 transition-all cursor-pointer"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-              <span>Disparar Requisição Flaky</span>
-            </button>
           </div>
 
-        </div>
 
-        {/* Real-Time Chaos Output Terminal (5 cols) */}
-        <div className="lg:col-span-5 flex flex-col h-[560px]">
-          <div className="p-4 rounded-lg bg-spectr-surface border border-spectr-border flex flex-col flex-1 shadow-lg">
-            <div className="flex items-center justify-between pb-2 border-b border-spectr-border mb-2 text-xs font-mono">
-              <span className="text-white flex items-center gap-2">
-                <Terminal className="w-3.5 h-3.5 text-purple-400" />
-                Terminal de Injeção
+          {/* Terminal de Saída de Injeção */}
+          <div className="rounded-lg bg-pm-light-surface dark:bg-pm-dark-surface border border-pm-light-border dark:border-pm-dark-border p-4 flex flex-col font-mono text-xs shadow-sm">
+            <div className="flex items-center justify-between pb-2 border-b border-pm-light-border dark:border-pm-dark-border text-pm-light-textMuted dark:text-pm-dark-textMuted text-[11px]">
+              <span className="flex items-center gap-1.5">
+                <Terminal className="w-3.5 h-3.5 text-pm-orange" />
+                Chaos Response Console
               </span>
-              {latency && (
-                <span className="text-[10px] text-spectr-terminal bg-spectr-terminal/10 px-2 py-0.5 rounded border border-spectr-terminal/30">
-                  {latency}ms medido
+              {latency !== null && (
+                <span className="text-pm-orange font-bold">
+                  Latency: {latency}ms
                 </span>
               )}
             </div>
 
-            <div className="flex-1 bg-black/90 rounded border border-spectr-border p-3 font-mono text-[11px] overflow-y-auto text-slate-300 space-y-2">
+            <div className="flex-1 mt-3 p-3 rounded bg-pm-light-bg dark:bg-[#151515] border border-pm-light-border dark:border-pm-dark-border overflow-y-auto text-[11px] text-pm-light-text dark:text-slate-300">
               {loading ? (
-                <div className="h-full flex flex-col items-center justify-center text-purple-400 gap-2">
-                  <RefreshCw className="w-5 h-5 animate-spin" />
-                  <span>Aguardando resposta do motor de caos...</span>
+                <div className="py-8 text-center text-pm-orange animate-pulse">
+                  Injetando caos e aguardando resposta da camada de rede...
                 </div>
               ) : output ? (
-                <pre className="text-[10px] leading-relaxed whitespace-pre-wrap">
+                <pre className="overflow-x-auto whitespace-pre-wrap">
                   {JSON.stringify(output, null, 2)}
                 </pre>
               ) : (
-                <div className="h-full flex flex-col items-center justify-center text-slate-600 text-center space-y-2">
-                  <Terminal className="w-8 h-8 opacity-30" />
-                  <p>Injete um parâmetro ao lado para ver a telemetria ao vivo.</p>
+                <div className="py-12 text-center text-pm-light-textMuted dark:text-pm-dark-textMuted">
+                  Nenhum teste de caos disparado. Escolha um dos controles à esquerda para testar.
                 </div>
               )}
             </div>
           </div>
+
         </div>
 
       </div>
-
     </div>
   );
 };

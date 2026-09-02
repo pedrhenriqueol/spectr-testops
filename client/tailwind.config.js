@@ -8,24 +8,47 @@ export default {
   theme: {
     extend: {
       colors: {
-        spectr: {
-          bg: '#08090C',         // Ultra-deep charcoal base
-          surface: '#0E1017',    // Deep surface
-          panel: '#11141F',      // Workstation panels
-          panelHover: '#161A29', // Hover state
-          border: '#1E2333',     // Precision borders
-          borderLight: '#283046',
-          violet: '#7C3AED',     // Cyber violet accent
-          violetHover: '#6D28D9',
-          violetGlow: 'rgba(124, 58, 237, 0.2)',
-          terminal: '#10B981',   // Laser terminal green
-          amber: '#F59E0B',
-          rose: '#EF4444'
+        pm: {
+          orange: '#FF6C37',
+          orangeHover: '#E05A2B',
+          orangeSubtle: 'rgba(255, 108, 55, 0.12)',
+          // Dark canvas (Postman Dark)
+          dark: {
+            bg: '#1C1C1C',
+            surface: '#212121',
+            sidebar: '#262626',
+            panel: '#1E1E1E',
+            panelHover: '#2E2E2E',
+            border: '#333333',
+            borderSubtle: '#2A2A2A',
+            text: '#E6E6E6',
+            textMuted: '#999999',
+          },
+          // Light canvas (Postman Light)
+          light: {
+            bg: '#FFFFFF',
+            surface: '#FDFDFD',
+            sidebar: '#F9F9F9',
+            panel: '#F5F5F5',
+            panelHover: '#ECECEC',
+            border: '#E6E6E6',
+            borderSubtle: '#EFEFEF',
+            text: '#212121',
+            textMuted: '#6B6B6B',
+          },
+          // Official Postman HTTP Methods
+          get: '#0CBB52',
+          post: '#FF6C37',
+          put: '#097BED',
+          delete: '#EB2013',
+          patch: '#A657FA',
+          options: '#00BCD4',
+          head: '#9C27B0',
         }
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', 'sans-serif'],
-        mono: ['JetBrains Mono', 'monospace'],
+        sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+        mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
       }
     },
   },

@@ -1,21 +1,11 @@
 import React, { useState } from 'react';
-import { TestSuite, TestCase, TestRun, TestAssertion } from '../types';
 import { 
-  Terminal, 
-  Search, 
-  Plus, 
-  CheckCircle2, 
-  XCircle, 
-  Clock, 
-  ChevronRight, 
-  ChevronDown, 
-  Layers, 
-  Code2, 
-  Copy, 
-  Check, 
-  ShieldCheck, 
-  Play
+  Plus, Search, Play, CheckCircle2, XCircle, Clock, Shield, 
+  Terminal, Copy, Check, FileJson, Key, Sliders, AlertTriangle, 
+  ChevronRight, ChevronDown, Folder, Code, Send, Sparkles, Layers,
+  ExternalLink, Edit3
 } from 'lucide-react';
+import { TestSuite, TestCase, TestRun, HttpMethod } from '../types';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface WorkstationProps {
@@ -27,6 +17,7 @@ interface WorkstationProps {
   isExecuting: boolean;
   onOpenCreateModal: () => void;
   onOpenCreateEndpointModal: () => void;
+  onUpdateBaseUrl?: (newUrl: string) => Promise<void>;
 }
 
 export const Workstation: React.FC<WorkstationProps> = ({
@@ -37,448 +28,554 @@ export const Workstation: React.FC<WorkstationProps> = ({
   latestRun,
   isExecuting,
   onOpenCreateModal,
-  onOpenCreateEndpointModal
+  onOpenCreateEndpointModal,
+  onUpdateBaseUrl
 }) => {
-  const [search, setSearch] = useState('');
   const [selectedCase, setSelectedCase] = useState<TestCase | null>(null);
-  const [activeConsoleTab, setActiveConsoleTab] = useState<'terminal' | 'assertions' | 'contract'>('terminal');
-  const [expandedAssertionId, setExpandedAssertionId] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [activeRequestTab, setActiveRequestTab] = useState<'params' | 'headers' | 'body' | 'assertions' | 'schema'>('assertions');
+  const [activeResponseTab, setActiveResponseTab] = useState<'cli' | 'assertions' | 'responseBody'>('cli');
   const [copied, setCopied] = useState(false);
+  const [isEditingUrl, setIsEditingUrl] = useState(false);
+  const [editedUrl, setEditedUrl] = useState('');
 
-  // Filtra casos de teste por busca
-  const filteredCases = selectedSuite?.cases.filter(c => 
+  // Sincroniza caso ativo quando muda de suíte
+  const activeCases = selectedSuite?.cases || [];
+  const currentCase = selectedCase || (activeCases.length > 0 ? activeCases[0] : null);
+
+  const filteredCases = activeCases.filter(c => 
     c.name.toLowerCase().includes(search.toLowerCase()) ||
     c.path.toLowerCase().includes(search.toLowerCase()) ||
     c.method.toLowerCase().includes(search.toLowerCase())
-  ) || [];
+  );
 
-  const getMethodBadge = (method: string) => {
-    switch (method.toUpperCase()) {
-      case 'GET':
-        return 'text-sky-400 bg-sky-500/10 border-sky-500/30';
-      case 'POST':
-        return 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30';
-      case 'PUT':
-        return 'text-amber-400 bg-amber-500/10 border-amber-500/30';
-      case 'DELETE':
-        return 'text-rose-400 bg-rose-500/10 border-rose-500/30';
-      default:
-        return 'text-purple-400 bg-purple-500/10 border-purple-500/30';
-    }
-  };
-
-  const handleCopyPayload = (text: string) => {
+  const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleSaveBaseUrl = async () => {
+    if (editedUrl.trim() && onUpdateBaseUrl) {
+      await onUpdateBaseUrl(editedUrl.trim());
+      setIsEditingUrl(false);
+    }
+  };
+
+  const getMethodBadgeClass = (method: string) => {
+    switch (method.toUpperCase()) {
+      case 'GET': return 'bg-pm-get/15 text-pm-get border-pm-get/30';
+      case 'POST': return 'bg-pm-post/15 text-pm-post border-pm-post/30';
+      case 'PUT': return 'bg-pm-put/15 text-pm-put border-pm-put/30';
+      case 'DELETE': return 'bg-pm-delete/15 text-pm-delete border-pm-delete/30';
+      case 'PATCH': return 'bg-pm-patch/15 text-pm-patch border-pm-patch/30';
+      default: return 'bg-slate-500/15 text-slate-400 border-slate-500/30';
+    }
+  };
+
+  const getMethodTextClass = (method: string) => {
+    switch (method.toUpperCase()) {
+      case 'GET': return 'text-pm-get';
+      case 'POST': return 'text-pm-post';
+      case 'PUT': return 'text-pm-put';
+      case 'DELETE': return 'text-pm-delete';
+      case 'PATCH': return 'text-pm-patch';
+      default: return 'text-slate-400';
+    }
+  };
+
   return (
-    <div className="flex-1 flex overflow-hidden bg-spectr-bg">
+    <div className="flex-1 flex overflow-hidden bg-pm-light-bg dark:bg-pm-dark-bg transition-colors duration-200">
       
-      {/* ── COLUNA ESQUERDA (40%): ÁRVORE DE COLEÇÕES & REQUISIÇÕES HTTP ── */}
-      <div className="w-[380px] lg:w-[420px] bg-spectr-surface border-r border-spectr-border flex flex-col shrink-0">
+      {/* ── COLUNA ESQUERDA (320px): POSTMAN COLLECTIONS SIDEBAR ── */}
+      <div className="w-80 bg-pm-light-sidebar dark:bg-pm-dark-sidebar border-r border-pm-light-border dark:border-pm-dark-border flex flex-col shrink-0">
         
-        {/* Collection Toolbar */}
-        <div className="p-3 border-b border-spectr-border space-y-2.5">
+        {/* Collections Toolbar */}
+        <div className="p-3 border-b border-pm-light-border dark:border-pm-dark-border space-y-2.5">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-white uppercase tracking-wider font-mono flex items-center gap-1.5">
-              <Layers className="w-3.5 h-3.5 text-purple-400" />
-              Coleções & Suítes
+            <span className="text-[11px] font-bold text-pm-light-text dark:text-pm-dark-text uppercase tracking-wider font-mono flex items-center gap-1.5">
+              <Folder className="w-3.5 h-3.5 text-pm-orange" />
+              Collections
             </span>
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1">
               <button
                 onClick={onOpenCreateEndpointModal}
                 disabled={!selectedSuite}
-                title="Adicionar Endpoint à Suíte Atual"
-                className="px-2 py-1 rounded bg-spectr-violet/20 hover:bg-spectr-violet/30 border border-spectr-violet/50 text-purple-200 transition-colors text-[11px] flex items-center gap-1 font-mono cursor-pointer disabled:opacity-40"
+                title="Adicionar Novo Request/Endpoint"
+                className="px-2 py-1 rounded bg-pm-orange/15 hover:bg-pm-orange/25 border border-pm-orange/40 text-pm-orange text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer disabled:opacity-40"
               >
                 <Plus className="w-3 h-3" />
-                <span>Endpoint</span>
+                <span>Request</span>
               </button>
               <button
                 onClick={onOpenCreateModal}
-                title="Criar Nova Suíte de Testes"
-                className="p-1 rounded bg-spectr-panel hover:bg-spectr-panelHover border border-spectr-border text-slate-300 hover:text-white transition-colors text-[11px] flex items-center gap-1 font-mono cursor-pointer"
+                title="Criar Nova Coleção"
+                className="p-1 rounded bg-pm-light-panel dark:bg-pm-dark-panel hover:bg-pm-light-panelHover dark:hover:bg-pm-dark-panelHover border border-pm-light-border dark:border-pm-dark-border text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-light-text dark:hover:text-pm-dark-text transition-colors text-[10px] flex items-center gap-1 cursor-pointer"
               >
                 <Plus className="w-3 h-3" />
-                <span>Suíte</span>
+                <span>Collection</span>
               </button>
             </div>
           </div>
 
           {/* Search Box */}
           <div className="relative">
-            <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+            <Search className="w-3.5 h-3.5 text-pm-light-textMuted dark:text-pm-dark-textMuted absolute left-2.5 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Filtrar endpoints, métodos..."
-              className="w-full pl-8 pr-3 py-1.5 bg-spectr-bg border border-spectr-border rounded-md text-xs text-white placeholder-slate-500 focus:outline-none focus:border-spectr-violet font-mono"
+              placeholder="Filter requests..."
+              className="w-full pl-8 pr-3 py-1 bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border rounded text-[11px] text-pm-light-text dark:text-pm-dark-text placeholder-pm-light-textMuted dark:placeholder-pm-dark-textMuted focus:outline-none focus:border-pm-orange"
             />
           </div>
         </div>
 
-        {/* Suites Selector Ribbon */}
-        {suites.length > 1 && (
-          <div className="px-3 py-2 border-b border-spectr-border flex items-center gap-1 overflow-x-auto text-xs">
-            {suites.map((s) => (
-              <button
-                key={s.id}
-                onClick={() => {
-                  onSelectSuite(s);
-                  setSelectedCase(null);
-                }}
-                className={`px-2.5 py-1 rounded text-[11px] font-mono whitespace-nowrap transition-colors cursor-pointer border ${
-                  selectedSuite?.id === s.id
-                    ? 'bg-spectr-violet/20 border-spectr-violet/60 text-purple-200'
-                    : 'bg-spectr-panel border-spectr-border text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                {s.name}
-              </button>
-            ))}
-          </div>
-        )}
+        {/* Collection Selector Tabs */}
+        <div className="px-3 py-2 border-b border-pm-light-border dark:border-pm-dark-border overflow-x-auto flex gap-1.5 scrollbar-none">
+          {suites.map((s) => (
+            <button
+              key={s.id}
+              onClick={() => {
+                onSelectSuite(s);
+                setSelectedCase(s.cases[0] || null);
+              }}
+              className={`px-2.5 py-1 rounded text-[11px] font-medium whitespace-nowrap transition-all cursor-pointer border ${
+                selectedSuite?.id === s.id
+                  ? 'bg-pm-orange text-white border-pm-orange shadow-sm font-semibold'
+                  : 'bg-pm-light-panel dark:bg-pm-dark-panel border-pm-light-border dark:border-pm-dark-border text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-light-text dark:hover:text-pm-dark-text'
+              }`}
+            >
+              {s.name.split('──')[0].trim()}
+            </button>
+          ))}
+        </div>
 
-        {/* Endpoints Tree View */}
+        {/* Requests Tree */}
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
           {selectedSuite ? (
             <div>
-              {/* Suite Node */}
-              <div className="px-2.5 py-2 rounded-md bg-spectr-panel/60 border border-spectr-border/80 flex items-center justify-between mb-2">
-                <div className="min-w-0">
-                  <h4 className="text-xs font-semibold text-white truncate">{selectedSuite.name}</h4>
-                  <span className="text-[10px] font-mono text-slate-400 block truncate">{selectedSuite.baseUrl}</span>
+              {/* Collection Header Row */}
+              <div className="px-2 py-1.5 rounded flex items-center justify-between text-xs font-semibold text-pm-light-text dark:text-pm-dark-text mb-1">
+                <div className="flex items-center gap-1.5 truncate">
+                  <ChevronDown className="w-3.5 h-3.5 text-pm-light-textMuted dark:text-pm-dark-textMuted" />
+                  <span className="truncate">{selectedSuite.name}</span>
                 </div>
-                <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-spectr-bg text-purple-400 border border-spectr-border">
+                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border text-pm-light-textMuted dark:text-pm-dark-textMuted">
                   {filteredCases.length}
                 </span>
               </div>
 
-              {/* Cases List */}
-              <div className="space-y-1">
+              {/* Request Items */}
+              <div className="pl-3 space-y-0.5">
                 {filteredCases.length === 0 ? (
-                  <div className="p-4 text-center text-xs text-slate-500 font-mono">
-                    Nenhum endpoint encontrado.
-                  </div>
+                  <p className="py-4 text-center text-xs text-pm-light-textMuted dark:text-pm-dark-textMuted">No requests match search.</p>
                 ) : (
                   filteredCases.map((c) => {
-                    const isSelected = selectedCase?.id === c.id;
-
+                    const isCurrent = currentCase?.id === c.id;
                     return (
-                      <div
+                      <motion.div
                         key={c.id}
+                        whileHover={{ x: 2 }}
                         onClick={() => setSelectedCase(c)}
-                        className={`p-2 rounded-md border transition-all cursor-pointer flex items-center justify-between gap-2 text-xs select-none ${
-                          isSelected
-                            ? 'bg-spectr-violet/15 border-spectr-violet/50 text-white'
-                            : 'bg-spectr-panel/40 border-transparent hover:border-spectr-border hover:bg-spectr-panel text-slate-300'
+                        className={`px-2.5 py-1.5 rounded flex items-center justify-between gap-2 cursor-pointer transition-colors text-xs ${
+                          isCurrent
+                            ? 'bg-pm-light-panelHover dark:bg-pm-dark-panelHover border-l-2 border-pm-orange text-pm-light-text dark:text-pm-dark-text font-medium'
+                            : 'hover:bg-pm-light-panel dark:hover:bg-pm-dark-panel text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-light-text dark:hover:text-pm-dark-text'
                         }`}
                       >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border uppercase shrink-0 ${getMethodBadge(c.method)}`}>
+                        <div className="flex items-center gap-2 truncate min-w-0">
+                          <span className={`font-mono text-[10px] font-bold w-9 uppercase shrink-0 ${getMethodTextClass(c.method)}`}>
                             {c.method}
                           </span>
-                          <span className="truncate text-[11px] font-mono">{c.path}</span>
+                          <span className="truncate text-[11px] font-mono">{c.name}</span>
                         </div>
-
-                        <div className="flex items-center gap-1.5 shrink-0 font-mono text-[10px]">
-                          <span className="text-slate-500">{c.expectedStatus}</span>
-                          <span className="text-slate-400 bg-spectr-bg px-1 rounded border border-spectr-border">
-                            {c.maxLatencyMs}ms
-                          </span>
-                        </div>
-                      </div>
+                        <span className="text-[10px] font-mono text-pm-light-textMuted dark:text-pm-dark-textMuted shrink-0">
+                          {c.maxLatencyMs}ms
+                        </span>
+                      </motion.div>
                     );
                   })
                 )}
               </div>
             </div>
           ) : (
-            <div className="p-6 text-center text-xs text-slate-500 font-mono">
-              Nenhuma suíte selecionada.
-            </div>
+            <p className="p-4 text-center text-xs text-pm-light-textMuted dark:text-pm-dark-textMuted">Select a collection.</p>
           )}
         </div>
 
-        {/* Bottom Status Bar */}
-        <div className="p-2.5 border-t border-spectr-border bg-spectr-surface/90 flex items-center justify-between text-[11px] font-mono text-slate-400">
-          <span>{selectedSuite?.cases.length || 0} requisições prontas</span>
-          <span className="text-purple-400">p95 SLA: 250ms</span>
+        {/* Sidebar Footer */}
+        <div className="p-2.5 border-t border-pm-light-border dark:border-pm-dark-border bg-pm-light-panel dark:bg-pm-dark-panel flex items-center justify-between text-[10px] font-mono text-pm-light-textMuted dark:text-pm-dark-textMuted">
+          <span>{filteredCases.length} endpoints</span>
+          <span className="text-pm-orange font-medium">Postman Engine v10</span>
         </div>
 
       </div>
 
 
-      {/* ── COLUNA DIREITA (60%): TEST EXECUTION CONSOLE & ASSERTION TERMINAL ── */}
-      <div className="flex-1 flex flex-col overflow-hidden bg-spectr-bg">
+      {/* ── COLUNA PRINCIPAL: POSTMAN REQUEST WORKBENCH & RESPONSE PANE ── */}
+      <div className="flex-1 flex flex-col overflow-hidden">
         
-        {/* Console Top Header & View Tabs */}
-        <div className="h-11 bg-spectr-surface border-b border-spectr-border px-4 flex items-center justify-between select-none shrink-0">
-          
-          {/* Tabs */}
-          <div className="flex items-center gap-1 font-mono text-xs">
-            <button
-              onClick={() => setActiveConsoleTab('terminal')}
-              className={`px-3 py-1 rounded text-[11px] transition-colors cursor-pointer ${
-                activeConsoleTab === 'terminal'
-                  ? 'bg-spectr-panel text-purple-300 border border-spectr-border'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              Console CLI Stream
-            </button>
-            <button
-              onClick={() => setActiveConsoleTab('assertions')}
-              className={`px-3 py-1 rounded text-[11px] transition-colors cursor-pointer ${
-                activeConsoleTab === 'assertions'
-                  ? 'bg-spectr-panel text-purple-300 border border-spectr-border'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              Asserções ({latestRun?.assertions?.length || 0})
-            </button>
-            <button
-              onClick={() => setActiveConsoleTab('contract')}
-              className={`px-3 py-1 rounded text-[11px] transition-colors cursor-pointer ${
-                activeConsoleTab === 'contract'
-                  ? 'bg-spectr-panel text-purple-300 border border-spectr-border'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              Contrato & JSON
-            </button>
-          </div>
+        {/* 1. Request Address Bar & HTTP Method Row */}
+        <div className="p-3 border-b border-pm-light-border dark:border-pm-dark-border bg-pm-light-surface dark:bg-pm-dark-surface flex items-center gap-2">
+          {currentCase ? (
+            <>
+              {/* Method Selector */}
+              <div className={`px-3 py-1.5 rounded border text-xs font-bold font-mono uppercase tracking-wider ${getMethodBadgeClass(currentCase.method)}`}>
+                {currentCase.method}
+              </div>
 
-          {/* Run Summary Telemetry */}
-          {latestRun && (
-            <div className="flex items-center gap-3 font-mono text-[11px]">
-              <span className={`font-bold px-2 py-0.5 rounded border ${
-                latestRun.status === 'PASSED'
-                  ? 'bg-spectr-terminal/15 text-spectr-terminal border-spectr-terminal/30'
-                  : 'bg-spectr-rose/15 text-spectr-rose border-spectr-rose/30'
-              }`}>
-                {latestRun.status}
-              </span>
-              <span className="text-slate-400">
-                {latestRun.passedTests}/{latestRun.totalTests} pass
-              </span>
-              <span className="text-purple-400">
-                p95: {latestRun.p95LatencyMs}ms
-              </span>
-            </div>
+              {/* URL Address Bar */}
+              <div className="flex-1 flex items-center bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border rounded px-3 py-1.5 text-xs font-mono">
+                <span className="text-pm-light-textMuted dark:text-pm-dark-textMuted shrink-0">
+                  {selectedSuite?.baseUrl.replace(/\/+$/, '')}
+                </span>
+                <span className="text-pm-orange font-semibold">{currentCase.path}</span>
+              </div>
+
+              {/* Send Button */}
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={() => selectedSuite && onRunSuite(selectedSuite.id)}
+                disabled={isExecuting}
+                className="px-4 py-1.5 bg-pm-orange hover:bg-pm-orangeHover disabled:opacity-50 text-white font-semibold rounded text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer font-sans"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>Send</span>
+              </motion.button>
+            </>
+          ) : (
+            <span className="text-xs text-pm-light-textMuted dark:text-pm-dark-textMuted">No request selected</span>
           )}
-
         </div>
 
-        {/* Console Body */}
-        <div className="flex-1 overflow-y-auto p-4 font-mono">
-          
-          {/* TAB 1: TERMINAL CLI STREAM */}
-          {activeConsoleTab === 'terminal' && (
-            <div className="h-full rounded-md bg-black/90 border border-spectr-border p-4 text-xs font-mono overflow-y-auto space-y-2 text-slate-300 shadow-inner">
-              
-              {/* Terminal Banner */}
-              <div className="text-slate-500 pb-2 border-b border-white/[0.06] text-[11px] flex items-center justify-between">
-                <span>SPECTR TestOps Execution Console v1.0.4 ── (Node 24 / Fastify Engine)</span>
-                <span>{new Date().toLocaleDateString('pt-BR')}</span>
-              </div>
-
-              {isExecuting ? (
-                <div className="py-8 text-center space-y-3">
-                  <div className="inline-block w-3 h-3 rounded-full bg-spectr-violet animate-ping" />
-                  <p className="text-purple-400 text-xs">
-                    Disparando esteira assíncrona de requisições HTTP contra o alvo...
-                  </p>
-                  <p className="text-[11px] text-slate-500">
-                    Avaliando códigos de status, headers de segurança e conformidade de latência p95/p99.
-                  </p>
-                </div>
-              ) : !latestRun ? (
-                <div className="py-12 text-center text-slate-600 text-xs space-y-2">
-                  <Terminal className="w-8 h-8 mx-auto opacity-30" />
-                  <p>Aguardando execução de testes.</p>
-                  <p className="text-[10px]">Pressione "Executar Bateria" no topo para disparar a suíte.</p>
+        {/* 2. Base URL Config & Quick Edit Bar */}
+        {selectedSuite && (
+          <div className="px-3 py-1.5 bg-pm-light-panel dark:bg-pm-dark-panel border-b border-pm-light-border dark:border-pm-dark-border flex items-center justify-between text-[11px] font-mono">
+            <div className="flex items-center gap-2">
+              <span className="text-pm-light-textMuted dark:text-pm-dark-textMuted font-bold">BASE_URL:</span>
+              {isEditingUrl ? (
+                <div className="flex items-center gap-1">
+                  <input
+                    type="text"
+                    value={editedUrl}
+                    onChange={(e) => setEditedUrl(e.target.value)}
+                    className="px-2 py-0.5 bg-pm-light-bg dark:bg-pm-dark-bg border border-pm-orange rounded text-pm-light-text dark:text-pm-dark-text text-[11px] w-72 focus:outline-none"
+                  />
+                  <button onClick={handleSaveBaseUrl} className="p-1 rounded bg-pm-orange text-white cursor-pointer"><Check className="w-3 h-3" /></button>
+                  <button onClick={() => setIsEditingUrl(false)} className="p-1 rounded bg-slate-500/20 text-slate-400 cursor-pointer"><XCircle className="w-3 h-3" /></button>
                 </div>
               ) : (
-                <div className="space-y-1.5 text-[11px] leading-relaxed">
-                  <p className="text-slate-500">
-                    [{new Date(latestRun.createdAt).toLocaleTimeString('pt-BR')}] ❯ INICIANDO EXECUÇÃO: "{latestRun.suite?.name}" ({latestRun.totalTests} casos)
-                  </p>
-
-                  {latestRun.assertions?.map((ast, idx) => (
-                    <div key={ast.id} className="flex items-start gap-2">
-                      <span className="text-slate-600 select-none w-5 text-right">{idx + 1}.</span>
-                      {ast.statusMatch ? (
-                        <span className="text-spectr-terminal font-bold">✔</span>
-                      ) : (
-                        <span className="text-spectr-rose font-bold">✖</span>
-                      )}
-                      
-                      <span className={`font-bold uppercase ${
-                        ast.method === 'GET' ? 'text-sky-400' : ast.method === 'POST' ? 'text-emerald-400' : 'text-amber-400'
-                      }`}>
-                        [{ast.method}]
-                      </span>
-
-                      <span className="text-white">{ast.endpoint}</span>
-                      <span className="text-slate-500">──</span>
-                      <span className={ast.statusMatch ? 'text-slate-200' : 'text-spectr-rose'}>
-                        {ast.actualStatus} HTTP
-                      </span>
-                      <span className="text-slate-500">•</span>
-                      <span className={ast.slaPassed ? 'text-purple-400' : 'text-amber-400'}>
-                        {ast.latencyMs}ms
-                      </span>
-                      
-                      {ast.schemaValid && (
-                        <span className="text-emerald-500/80 text-[10px]">[SCHEMA_OK]</span>
-                      )}
-
-                      {ast.errorMessage && (
-                        <span className="text-spectr-rose text-[10px]">({ast.errorMessage})</span>
-                      )}
-                    </div>
-                  ))}
-
-                  <div className="pt-3 mt-3 border-t border-white/[0.06] text-slate-400 space-y-1">
-                    <p>
-                      ── BATERIA FINALIZADA: <span className="text-white font-bold">{latestRun.passedTests}/{latestRun.totalTests} APROVADOS</span> • Taxa: <strong className={latestRun.successRate === 100 ? 'text-spectr-terminal' : 'text-spectr-rose'}>{latestRun.successRate}%</strong>
-                    </p>
-                    <p>
-                      ── METRICAS DE LATÊNCIA: p95 = <strong className="text-purple-400">{latestRun.p95LatencyMs}ms</strong> • p99 = <strong className="text-purple-400">{latestRun.p99LatencyMs}ms</strong> • Duração: {latestRun.totalDurationMs}ms
-                    </p>
-                    <p className="text-slate-600 text-[10px]">
-                      Trilha de auditoria persistida atomicamente no banco de dados.
-                    </p>
-                  </div>
-                </div>
-              )}
-
-            </div>
-          )}
-
-          {/* TAB 2: ASSERTION BREAKDOWN */}
-          {activeConsoleTab === 'assertions' && (
-            <div className="space-y-2">
-              {!latestRun?.assertions || latestRun.assertions.length === 0 ? (
-                <div className="p-8 text-center text-xs text-slate-500">
-                  Nenhuma asserção disponível. Execute a suíte primeiro.
-                </div>
-              ) : (
-                latestRun.assertions.map((ast) => {
-                  const isExpanded = expandedAssertionId === ast.id;
-
-                  return (
-                    <div
-                      key={ast.id}
-                      className="rounded-md border border-spectr-border bg-spectr-panel/70 overflow-hidden text-xs"
-                    >
-                      <div
-                        onClick={() => setExpandedAssertionId(isExpanded ? null : ast.id)}
-                        className="p-3 flex items-center justify-between gap-3 cursor-pointer hover:bg-spectr-panel"
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          {ast.statusMatch && ast.slaPassed ? (
-                            <CheckCircle2 className="w-4 h-4 text-spectr-terminal shrink-0" />
-                          ) : (
-                            <XCircle className="w-4 h-4 text-spectr-rose shrink-0" />
-                          )}
-                          <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border uppercase ${getMethodBadge(ast.method)}`}>
-                            {ast.method}
-                          </span>
-                          <span className="font-semibold text-white truncate">{ast.name}</span>
-                          <span className="text-[11px] text-slate-400 font-mono truncate">{ast.endpoint}</span>
-                        </div>
-
-                        <div className="flex items-center gap-3 font-mono text-[11px] shrink-0">
-                          <span className={ast.statusMatch ? 'text-spectr-terminal' : 'text-spectr-rose'}>
-                            {ast.actualStatus} HTTP
-                          </span>
-                          <span className={ast.slaPassed ? 'text-purple-400' : 'text-spectr-rose'}>
-                            {ast.latencyMs}ms
-                          </span>
-                          {isExpanded ? <ChevronDown className="w-3.5 h-3.5 text-slate-500" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-500" />}
-                        </div>
-                      </div>
-
-                      {isExpanded && (
-                        <div className="p-3 border-t border-spectr-border bg-black/60 space-y-2 text-[11px]">
-                          {ast.errorMessage && (
-                            <div className="p-2 rounded bg-spectr-rose/10 border border-spectr-rose/30 text-rose-300">
-                              <strong>Falha:</strong> {ast.errorMessage}
-                            </div>
-                          )}
-
-                          <div>
-                            <div className="flex items-center justify-between mb-1 text-slate-400">
-                              <span>Payload de Resposta (Inspecionado):</span>
-                              {ast.responseBody && (
-                                <button
-                                  onClick={() => handleCopyPayload(ast.responseBody || '')}
-                                  className="text-[10px] text-slate-400 hover:text-white flex items-center gap-1 cursor-pointer"
-                                >
-                                  {copied ? <Check className="w-3 h-3 text-spectr-terminal" /> : <Copy className="w-3 h-3" />}
-                                  <span>{copied ? 'Copiado' : 'Copiar'}</span>
-                                </button>
-                              )}
-                            </div>
-                            <pre className="p-2 rounded bg-black/90 border border-spectr-border text-slate-300 text-[10px] overflow-x-auto max-h-44">
-                              {ast.responseBody ? JSON.stringify(JSON.parse(ast.responseBody), null, 2) : 'Corpo vazio ou sem retorno.'}
-                            </pre>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })
+                <button
+                  onClick={() => {
+                    setEditedUrl(selectedSuite.baseUrl);
+                    setIsEditingUrl(true);
+                  }}
+                  className="flex items-center gap-1 text-pm-orange hover:underline cursor-pointer"
+                >
+                  <span>{selectedSuite.baseUrl}</span>
+                  <Edit3 className="w-2.5 h-2.5 opacity-60" />
+                </button>
               )}
             </div>
-          )}
 
-          {/* TAB 3: CONTRACT & JSON INSPECTOR */}
-          {activeConsoleTab === 'contract' && (
-            <div className="space-y-4">
-              <div className="p-4 rounded-md bg-spectr-panel border border-spectr-border space-y-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-semibold text-white uppercase tracking-wider">
-                    Contrato do Endpoint Selecionado
-                  </h4>
-                  {selectedCase && (
-                    <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border uppercase ${getMethodBadge(selectedCase.method)}`}>
-                      {selectedCase.method} {selectedCase.path}
-                    </span>
-                  )}
-                </div>
+            <div className="flex items-center gap-3 text-pm-light-textMuted dark:text-pm-dark-textMuted">
+              <span>Expected Status: <strong className="text-emerald-500 font-bold">{currentCase?.expectedStatus || 200} OK</strong></span>
+              <span>•</span>
+              <span>SLA Target: <strong className="text-pm-orange">{currentCase?.maxLatencyMs || 250}ms</strong></span>
+            </div>
+          </div>
+        )}
 
-                {selectedCase ? (
-                  <div className="space-y-3 text-xs">
-                    <div>
-                      <span className="text-slate-400 block mb-1">JSON Schema Esperado:</span>
-                      <pre className="p-3 rounded bg-black/90 border border-spectr-border text-purple-300 text-[11px] overflow-x-auto">
-                        {selectedCase.expectedSchema ? JSON.stringify(JSON.parse(selectedCase.expectedSchema), null, 2) : '// Nenhum schema formal exigido (Status Code validação apenas)'}
-                      </pre>
-                    </div>
-
-                    {selectedCase.body && (
-                      <div>
-                        <span className="text-slate-400 block mb-1">Payload de Envio (Request Body):</span>
-                        <pre className="p-3 rounded bg-black/90 border border-spectr-border text-slate-300 text-[11px] overflow-x-auto">
-                          {selectedCase.body}
-                        </pre>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <p className="text-slate-500 text-xs py-6 text-center">
-                    Clique em qualquer endpoint na coluna da esquerda para inspecionar seus contratos e payloads.
-                  </p>
+        {/* 3. Request Settings Tabs (Params, Headers, Body, Assertions, Schema) */}
+        <div className="border-b border-pm-light-border dark:border-pm-dark-border bg-pm-light-surface dark:bg-pm-dark-surface px-3 flex items-center gap-1 text-xs">
+          {[
+            { id: 'assertions', label: 'Assertions & SLA', count: 2 },
+            { id: 'headers', label: 'Headers', count: 3 },
+            { id: 'body', label: 'Body (JSON)', count: currentCase?.body ? 1 : 0 },
+            { id: 'schema', label: 'Contract Schema', count: currentCase?.expectedSchema ? 1 : 0 },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveRequestTab(tab.id as any)}
+              className={`px-3 py-2 border-b-2 font-medium text-[11px] transition-colors relative cursor-pointer ${
+                activeRequestTab === tab.id
+                  ? 'border-pm-orange text-pm-orange font-semibold'
+                  : 'border-transparent text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-light-text dark:hover:text-pm-dark-text'
+              }`}
+            >
+              <div className="flex items-center gap-1.5">
+                <span>{tab.label}</span>
+                {tab.count > 0 && (
+                  <span className="text-[9px] px-1 rounded-full bg-pm-light-panel dark:bg-pm-dark-panel text-pm-light-textMuted dark:text-pm-dark-textMuted">
+                    {tab.count}
+                  </span>
                 )}
               </div>
+            </button>
+          ))}
+        </div>
+
+        {/* 4. Request Configuration Viewport */}
+        <div className="h-44 p-3 bg-pm-light-bg dark:bg-pm-dark-bg border-b border-pm-light-border dark:border-pm-dark-border overflow-y-auto text-xs font-mono">
+          <AnimatePresence mode="wait">
+            {activeRequestTab === 'assertions' && (
+              <motion.div
+                initial={{ opacity: 0, y: 3 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -3 }}
+                className="space-y-2"
+              >
+                <div className="flex items-center justify-between p-2 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                    <span>Status Code Check</span>
+                  </div>
+                  <span className="text-emerald-500 font-bold">pm.response.to.have.status({currentCase?.expectedStatus || 200})</span>
+                </div>
+
+                <div className="flex items-center justify-between p-2 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border">
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-3.5 h-3.5 text-pm-orange" />
+                    <span>Response Time SLA Threshold</span>
+                  </div>
+                  <span className="text-pm-orange font-bold">pm.response.responseTime &lt; {currentCase?.maxLatencyMs || 250}ms</span>
+                </div>
+              </motion.div>
+            )}
+
+            {activeRequestTab === 'headers' && (
+              <motion.div
+                initial={{ opacity: 0, y: 3 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -3 }}
+                className="space-y-1.5"
+              >
+                <div className="grid grid-cols-12 gap-2 text-pm-light-textMuted dark:text-pm-dark-textMuted font-bold text-[10px] pb-1 border-b border-pm-light-border dark:border-pm-dark-border">
+                  <span className="col-span-5">KEY</span>
+                  <span className="col-span-7">VALUE</span>
+                </div>
+                <div className="grid grid-cols-12 gap-2 text-[11px]">
+                  <span className="col-span-5 text-pm-orange font-semibold">Content-Type</span>
+                  <span className="col-span-7 text-pm-light-text dark:text-pm-dark-text">application/json</span>
+                </div>
+                <div className="grid grid-cols-12 gap-2 text-[11px]">
+                  <span className="col-span-5 text-pm-orange font-semibold">Accept</span>
+                  <span className="col-span-7 text-pm-light-text dark:text-pm-dark-text">application/json</span>
+                </div>
+                <div className="grid grid-cols-12 gap-2 text-[11px]">
+                  <span className="col-span-5 text-pm-orange font-semibold">Authorization</span>
+                  <span className="col-span-7 text-emerald-500 font-semibold">Bearer &lt;dynamic_jwt_session&gt;</span>
+                </div>
+              </motion.div>
+            )}
+
+            {activeRequestTab === 'body' && (
+              <motion.div
+                initial={{ opacity: 0, y: 3 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -3 }}
+              >
+                {currentCase?.body ? (
+                  <pre className="p-2 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border text-[11px] text-pm-light-text dark:text-pm-dark-text overflow-x-auto">
+                    {(() => {
+                      try {
+                        return JSON.stringify(JSON.parse(currentCase.body), null, 2);
+                      } catch {
+                        return currentCase.body;
+                      }
+                    })()}
+                  </pre>
+                ) : (
+                  <p className="text-pm-light-textMuted dark:text-pm-dark-textMuted py-4 text-center">No JSON payload body configured for this request.</p>
+                )}
+              </motion.div>
+            )}
+
+            {activeRequestTab === 'schema' && (
+              <motion.div
+                initial={{ opacity: 0, y: 3 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -3 }}
+              >
+                {currentCase?.expectedSchema ? (
+                  <pre className="p-2 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border text-[11px] text-pm-light-text dark:text-pm-dark-text overflow-x-auto">
+                    {currentCase.expectedSchema}
+                  </pre>
+                ) : (
+                  <p className="text-pm-light-textMuted dark:text-pm-dark-textMuted py-4 text-center">Automatic schema verification enabled (validates 200 OK structure).</p>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+
+        {/* 5. Response Pane & Postman Test Runner Stream */}
+        <div className="flex-1 flex flex-col min-h-0 bg-pm-light-surface dark:bg-pm-dark-surface">
+          
+          {/* Response Pane Header Bar */}
+          <div className="h-10 bg-pm-light-sidebar dark:bg-pm-dark-sidebar border-b border-pm-light-border dark:border-pm-dark-border px-3 flex items-center justify-between text-xs shrink-0">
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setActiveResponseTab('cli')}
+                className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer ${
+                  activeResponseTab === 'cli'
+                    ? 'bg-pm-orange text-white font-semibold shadow-sm'
+                    : 'text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-light-text dark:hover:text-pm-dark-text'
+                }`}
+              >
+                Test Results Console
+              </button>
+              <button
+                onClick={() => setActiveResponseTab('assertions')}
+                className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer ${
+                  activeResponseTab === 'assertions'
+                    ? 'bg-pm-orange text-white font-semibold shadow-sm'
+                    : 'text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-light-text dark:hover:text-pm-dark-text'
+                }`}
+              >
+                Test Breakdown ({latestRun?.assertions?.length || 0})
+              </button>
             </div>
-          )}
+
+            {/* Status Metric Pills (Postman Style) */}
+            {latestRun && (
+              <div className="flex items-center gap-2 text-[11px] font-mono">
+                <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 font-bold">
+                  Status: {latestRun.passedTests}/{latestRun.totalTests} PASS ({latestRun.successRate}%)
+                </span>
+                <span className="px-2 py-0.5 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border text-pm-light-text dark:text-pm-dark-text">
+                  Time: <strong className="text-pm-orange">{latestRun.totalDurationMs}ms</strong>
+                </span>
+                <span className="px-2 py-0.5 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border text-pm-light-text dark:text-pm-dark-text">
+                  p95: <strong className="text-pm-orange">{latestRun.p95LatencyMs}ms</strong>
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Response Viewport */}
+          <div className="flex-1 p-3 overflow-y-auto font-mono text-xs">
+            <AnimatePresence mode="wait">
+              
+              {/* CLI Stream Tab */}
+              {activeResponseTab === 'cli' && (
+                <motion.div
+                  key="cli"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="h-full rounded bg-pm-light-bg dark:bg-[#151515] border border-pm-light-border dark:border-pm-dark-border p-3 text-[11px] text-pm-light-text dark:text-slate-300 overflow-y-auto space-y-1.5 shadow-inner"
+                >
+                  <div className="text-pm-light-textMuted dark:text-slate-500 pb-2 border-b border-pm-light-border dark:border-white/[0.08] flex items-center justify-between text-[10px]">
+                    <span>POSTMAN RUNNER PROTOCOL v10.14 ── FASTIFY TEST ENGINE</span>
+                    <span>{new Date().toLocaleDateString('pt-BR')}</span>
+                  </div>
+
+                  {isExecuting ? (
+                    <div className="py-8 text-center space-y-2">
+                      <div className="inline-block w-3 h-3 rounded-full bg-pm-orange animate-ping" />
+                      <p className="text-pm-orange font-bold">Executing test collection against target server...</p>
+                      <p className="text-[10px] text-pm-light-textMuted dark:text-slate-500">Dispatching assertions, verifying JWT chain and telemetry metrics.</p>
+                    </div>
+                  ) : !latestRun ? (
+                    <div className="py-12 text-center text-pm-light-textMuted dark:text-slate-500 space-y-1">
+                      <Terminal className="w-8 h-8 mx-auto opacity-30" />
+                      <p>No tests executed yet.</p>
+                      <p className="text-[10px]">Click "Send" or "Run Collection" to dispatch test battery.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5 leading-relaxed">
+                      <p className="text-pm-light-textMuted dark:text-slate-500">
+                        [{new Date(latestRun.createdAt).toLocaleTimeString('pt-BR')}] ❯ RUNNING: "{latestRun.suite?.name}" ({latestRun.totalTests} requests)
+                      </p>
+
+                      {latestRun.assertions?.map((ast, idx) => (
+                        <motion.div
+                          key={ast.id}
+                          initial={{ opacity: 0, x: -5 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: idx * 0.04 }}
+                          className="flex items-start gap-2 text-[11px]"
+                        >
+                          <span className="text-pm-light-textMuted dark:text-slate-600 w-4 text-right">{idx + 1}.</span>
+                          {ast.statusMatch ? (
+                            <span className="text-emerald-500 font-bold">PASS ✔</span>
+                          ) : (
+                            <span className="text-rose-500 font-bold">FAIL ✖</span>
+                          )}
+                          
+                          <span className={`font-bold uppercase ${getMethodTextClass(ast.method)}`}>
+                            [{ast.method}]
+                          </span>
+
+                          <span className="text-pm-light-text dark:text-white font-medium">{ast.endpoint}</span>
+                          <span className="text-pm-light-textMuted dark:text-slate-500">──</span>
+                          <span className={ast.statusMatch ? 'text-emerald-500 font-bold' : 'text-rose-500'}>
+                            {ast.actualStatus} HTTP
+                          </span>
+                          <span className="text-pm-light-textMuted dark:text-slate-500">•</span>
+                          <span className={ast.slaPassed ? 'text-pm-orange' : 'text-amber-500 font-bold'}>
+                            {ast.latencyMs}ms
+                          </span>
+                          
+                          {ast.schemaValid && (
+                            <span className="text-emerald-500/80 text-[10px]">[SCHEMA_VALID]</span>
+                          )}
+                        </motion.div>
+                      ))}
+
+                      <div className="pt-2 mt-2 border-t border-pm-light-border dark:border-white/[0.08] text-[11px] space-y-0.5">
+                        <p>
+                          ── RESULT: <strong className="text-emerald-500">{latestRun.passedTests}/{latestRun.totalTests} PASSED</strong> • Success Rate: <strong className="text-pm-orange">{latestRun.successRate}%</strong>
+                        </p>
+                        <p className="text-pm-light-textMuted dark:text-slate-400">
+                          ── LATENCY: p95 = <strong className="text-pm-orange">{latestRun.p95LatencyMs}ms</strong> • Total Duration: {latestRun.totalDurationMs}ms
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </motion.div>
+              )}
+
+              {/* Assertions Tab */}
+              {activeResponseTab === 'assertions' && (
+                <motion.div
+                  key="assertions"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="space-y-2"
+                >
+                  {latestRun?.assertions?.map((ast) => (
+                    <div
+                      key={ast.id}
+                      className="p-2.5 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border flex items-center justify-between text-xs"
+                    >
+                      <div className="flex items-center gap-2">
+                        {ast.statusMatch ? (
+                          <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-500 text-[10px] font-bold border border-emerald-500/30">PASS</span>
+                        ) : (
+                          <span className="px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-500 text-[10px] font-bold border border-rose-500/30">FAIL</span>
+                        )}
+                        <span className={`font-mono text-[10px] font-bold uppercase ${getMethodTextClass(ast.method)}`}>[{ast.method}]</span>
+                        <span className="font-semibold text-pm-light-text dark:text-pm-dark-text">{ast.name}</span>
+                        <span className="text-pm-light-textMuted dark:text-pm-dark-textMuted font-mono text-[11px]">({ast.endpoint})</span>
+                      </div>
+
+                      <div className="flex items-center gap-3 font-mono text-[11px]">
+                        <span className="text-emerald-500 font-bold">{ast.actualStatus} HTTP</span>
+                        <span className="text-pm-orange">{ast.latencyMs}ms</span>
+                      </div>
+                    </div>
+                  ))}
+                </motion.div>
+              )}
+
+            </AnimatePresence>
+          </div>
 
         </div>
 
