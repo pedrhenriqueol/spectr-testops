@@ -37,7 +37,7 @@ async function main() {
     {
       name: 'PayStream Gateway Liveness & Healthcheck',
       method: 'GET',
-      path: '/health',
+      path: 'https://paystream-gateway.onrender.com/health',
       expectedStatus: 200,
       maxLatencyMs: 250,
       expectedSchema: JSON.stringify({ required: ['status', 'service'] }),
@@ -48,9 +48,9 @@ async function main() {
       method: 'POST',
       path: '/auth/login',
       body: JSON.stringify({
-        merchantSlug: 'merchant-demo',
-        email: 'merchant@demo.com',
-        password: 'merchant_demo_2026!'
+        merchantSlug: 'techstore',
+        email: 'admin@techstore.com',
+        password: 'pedrooliveira1227!'
       }),
       expectedStatus: 200,
       maxLatencyMs: 400,

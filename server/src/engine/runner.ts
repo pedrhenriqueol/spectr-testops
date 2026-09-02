@@ -53,10 +53,16 @@ export async function executeTestSuite(suiteId: string, workspaceId: string, tri
     }
   }
 
+  let dynamicToken: string | null = null;
+
   for (const testCase of suite.cases) {
     const url = testCase.path.startsWith('http://') || testCase.path.startsWith('https://')
       ? testCase.path
       : suite.baseUrl.replace(/\/+$/, '') + '/' + testCase.path.replace(/^\/+/, '');
+
+    if (dynamicToken) {
+      globalHeaders['Authorization'] = `Bearer ${dynamicToken}`;
+    }
     
     let caseHeaders: Record<string, string> = { ...globalHeaders };
     if (testCase.headers) {
