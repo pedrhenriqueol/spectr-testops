@@ -3,7 +3,7 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log('🌱 Semeando dados de demonstração do Spectr TestOps...');
+  console.log('🌱 Semeando suítes de teste do Spectr TestOps...');
 
   // 1. Workspace
   const workspace = await prisma.workspace.upsert({
@@ -16,12 +16,92 @@ async function main() {
     }
   });
 
-  // 2. Test Suite
-  const suite = await prisma.testSuite.create({
+  // Limpa suítes anteriores para recriar de forma limpa
+  await prisma.testSuite.deleteMany({ where: { workspaceId: workspace.id } });
+
+  // 2. SUÍTE 1: PayStream Gateway ── Core Banking & Resilience Suite
+  const paystreamSuite = await prisma.testSuite.create({
     data: {
       workspaceId: workspace.id,
-      name: 'E-Commerce Core & Checkout Resilience Suite',
-      description: 'Bateria de validação de endpoints transacionais, SLA de latência (p95 < 250ms) e simulação de resiliência a falhas.',
+      name: 'PayStream Gateway ── Core Banking & Resilience Suite',
+      description: 'Validação de ponta a ponta dos endpoints transacionais do PayStream: healthcheck de liveness, login com JWT, ledger de transações, split de sellers e disparo de webhook assinado HMAC-SHA256.',
+      baseUrl: 'https://paystream-gateway-server.onrender.com/api/v1',
+      headers: JSON.stringify({
+        'Accept': 'application/json',
+        'X-Client-Auditor': 'Spectr-TestOps-v1'
+      })
+    }
+  });
+
+  const paystreamCases = [
+    {
+      name: 'PayStream Gateway Liveness & Healthcheck',
+      method: 'GET',
+      path: '/health',
+      expectedStatus: 200,
+      maxLatencyMs: 250,
+      expectedSchema: JSON.stringify({ required: ['status', 'service'] }),
+      orderIndex: 0
+    },
+    {
+      name: 'Merchant Authentication & Token Generation',
+      method: 'POST',
+      path: '/auth/login',
+      body: JSON.stringify({
+        merchantSlug: 'merchant-demo',
+        email: 'merchant@demo.com',
+        password: 'merchant_demo_2026!'
+      }),
+      expectedStatus: 200,
+      maxLatencyMs: 400,
+      expectedSchema: JSON.stringify({ required: ['token', 'merchant'] }),
+      orderIndex: 1
+    },
+    {
+      name: 'Transactions Ledger & Concurrent TPV Audit',
+      method: 'GET',
+      path: '/transactions',
+      expectedStatus: 200,
+      maxLatencyMs: 350,
+      orderIndex: 2
+    },
+    {
+      name: 'Split Engine: Sellers & Marketplace Recipients',
+      method: 'GET',
+      path: '/recipients',
+      expectedStatus: 200,
+      maxLatencyMs: 300,
+      orderIndex: 3
+    },
+    {
+      name: 'Signed HMAC Webhook Ping Verification',
+      method: 'POST',
+      path: '/webhooks/test-ping',
+      body: JSON.stringify({
+        event: 'transaction.paid',
+        amount: 1500.00
+      }),
+      expectedStatus: 200,
+      maxLatencyMs: 500,
+      orderIndex: 4
+    }
+  ];
+
+  for (const c of paystreamCases) {
+    await prisma.testCase.create({
+      data: {
+        suiteId: paystreamSuite.id,
+        ...c
+      }
+    });
+  }
+
+  // 3. SUÍTE 2: E-Commerce Core & Checkout Resilience Suite (Chaos & Echo Interno)
+  const chaosSuite = await prisma.testSuite.create({
+    data: {
+      workspaceId: workspace.id,
+      name: 'E-Commerce Core & Chaos Resilience Suite',
+      description: 'Bateria interna de simulação de falhas de infraestrutura, injeção de atrasos artificiais e testes de tolerância a instabilidade.',
       baseUrl: 'http://localhost:3335/api/v1',
       headers: JSON.stringify({
         'Authorization': 'Bearer test-token-qa-demo',
@@ -30,10 +110,9 @@ async function main() {
     }
   });
 
-  // 3. Test Cases
-  const casesData = [
+  const chaosCases = [
     {
-      name: 'Health Check & Gateway Liveness',
+      name: 'Health Check & Gateway Echo Liveness',
       method: 'GET',
       path: '/chaos/echo',
       expectedStatus: 200,
@@ -42,7 +121,7 @@ async function main() {
       orderIndex: 0
     },
     {
-      name: 'Simulação de Latência & SLA Compliance',
+      name: 'Simulação de Latência de Rede (80ms)',
       method: 'GET',
       path: '/chaos/simulate-delay?delay=80',
       expectedStatus: 200,
@@ -61,7 +140,7 @@ async function main() {
       orderIndex: 2
     },
     {
-      name: 'Chaos Injection: Injeção de Falha 503',
+      name: 'Chaos Injection: Injeção de Falha 503 Service Unavailable',
       method: 'GET',
       path: '/chaos/simulate-error?code=503',
       expectedStatus: 503,
@@ -70,7 +149,7 @@ async function main() {
       orderIndex: 3
     },
     {
-      name: 'Chaos Injection: Teste de Resiliência Flaky',
+      name: 'Chaos Injection: Teste de Resiliência Flaky (50% Drop)',
       method: 'GET',
       path: '/chaos/simulate-flaky',
       expectedStatus: 200,
@@ -79,16 +158,16 @@ async function main() {
     }
   ];
 
-  for (const c of casesData) {
+  for (const c of chaosCases) {
     await prisma.testCase.create({
       data: {
-        suiteId: suite.id,
+        suiteId: chaosSuite.id,
         ...c
       }
     });
   }
 
-  console.log('✅ Seed finalizado com sucesso! Workspace e Suíte criados.');
+  console.log('✅ Seed finalizado com sucesso! Suíte do PayStream e Suíte de Caos criadas.');
 }
 
 main()

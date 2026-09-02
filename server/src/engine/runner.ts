@@ -54,7 +54,9 @@ export async function executeTestSuite(suiteId: string, workspaceId: string, tri
   }
 
   for (const testCase of suite.cases) {
-    const url = suite.baseUrl.replace(/\/+$/, '') + '/' + testCase.path.replace(/^\/+/, '');
+    const url = testCase.path.startsWith('http://') || testCase.path.startsWith('https://')
+      ? testCase.path
+      : suite.baseUrl.replace(/\/+$/, '') + '/' + testCase.path.replace(/^\/+/, '');
     
     let caseHeaders: Record<string, string> = { ...globalHeaders };
     if (testCase.headers) {

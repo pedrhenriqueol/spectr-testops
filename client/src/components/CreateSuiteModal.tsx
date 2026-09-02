@@ -19,9 +19,15 @@ export const CreateSuiteModal: React.FC<CreateSuiteModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleFillDemo = () => {
-    setName('Microserviço de Autenticação & Tokens');
-    setDescription('Validação de ciclo de vida de JWT, headers de segurança e revogação de chaves.');
+  const handleFillPayStreamDemo = () => {
+    setName('PayStream Gateway ── Core Banking Suite');
+    setDescription('Bateria de testes de estresse, concorrência, idempotência e webhooks assinados do PayStream.');
+    setBaseUrl('https://paystream-gateway-server.onrender.com/api/v1');
+  };
+
+  const handleFillChaosDemo = () => {
+    setName('Microserviço Local & Chaos Engine');
+    setDescription('Validação de ciclo de vida de JWT, headers de segurança e injeção de atraso artificial.');
     setBaseUrl('http://localhost:3335/api/v1');
   };
 
@@ -46,10 +52,17 @@ export const CreateSuiteModal: React.FC<CreateSuiteModalProps> = ({
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={handleFillDemo}
-              className="px-2.5 py-1 bg-spectr-violet/20 hover:bg-spectr-violet/30 border border-spectr-violet/40 text-purple-300 text-[11px] font-medium rounded transition-all cursor-pointer font-mono"
+              onClick={handleFillPayStreamDemo}
+              className="px-2 py-0.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-[10px] font-medium rounded transition-all cursor-pointer font-mono"
             >
-              Preencher Demo
+              Demo PayStream
+            </button>
+            <button
+              type="button"
+              onClick={handleFillChaosDemo}
+              className="px-2 py-0.5 bg-spectr-violet/20 hover:bg-spectr-violet/30 border border-spectr-violet/40 text-purple-300 text-[10px] font-medium rounded transition-all cursor-pointer font-mono"
+            >
+              Demo Chaos
             </button>
             <button onClick={onClose} className="text-slate-400 hover:text-white">
               <X className="w-4 h-4" />
