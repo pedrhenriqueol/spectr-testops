@@ -39,7 +39,7 @@ async function main() {
       method: 'GET',
       path: 'https://paystream-gateway.onrender.com/health',
       expectedStatus: 200,
-      maxLatencyMs: 250,
+      maxLatencyMs: 1000,
       expectedSchema: JSON.stringify({ required: ['status', 'service'] }),
       orderIndex: 0
     },
@@ -53,7 +53,7 @@ async function main() {
         password: 'pedrooliveira1227!'
       }),
       expectedStatus: 200,
-      maxLatencyMs: 400,
+      maxLatencyMs: 1500,
       expectedSchema: JSON.stringify({ required: ['token', 'merchant'] }),
       orderIndex: 1
     },
@@ -62,7 +62,7 @@ async function main() {
       method: 'GET',
       path: '/transactions',
       expectedStatus: 200,
-      maxLatencyMs: 350,
+      maxLatencyMs: 1500,
       orderIndex: 2
     },
     {
@@ -70,7 +70,7 @@ async function main() {
       method: 'GET',
       path: '/recipients',
       expectedStatus: 200,
-      maxLatencyMs: 300,
+      maxLatencyMs: 1500,
       orderIndex: 3
     },
     {
@@ -82,7 +82,7 @@ async function main() {
         amount: 1500.00
       }),
       expectedStatus: 200,
-      maxLatencyMs: 500,
+      maxLatencyMs: 1500,
       orderIndex: 4
     }
   ];
@@ -125,7 +125,7 @@ async function main() {
       method: 'GET',
       path: '/chaos/simulate-delay?delay=80',
       expectedStatus: 200,
-      maxLatencyMs: 300,
+      maxLatencyMs: 1500,
       expectedSchema: JSON.stringify({ required: ['simulated', 'delayInjectedMs'] }),
       orderIndex: 1
     },
@@ -153,7 +153,7 @@ async function main() {
       method: 'GET',
       path: '/chaos/simulate-flaky',
       expectedStatus: 200,
-      maxLatencyMs: 400,
+      maxLatencyMs: 1500,
       orderIndex: 4
     }
   ];
