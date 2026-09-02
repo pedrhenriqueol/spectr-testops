@@ -22,7 +22,7 @@ export const CreateSuiteModal: React.FC<CreateSuiteModalProps> = ({
   const handleFillPayStreamDemo = () => {
     setName('PayStream Gateway ── Core Banking Suite');
     setDescription('Bateria de testes de estresse, concorrência, idempotência e webhooks assinados do PayStream.');
-    setBaseUrl('https://paystream-gateway-server.onrender.com/api/v1');
+    setBaseUrl('https://paystream-gateway.onrender.com/api/v1');
   };
 
   const handleFillChaosDemo = () => {

@@ -25,7 +25,7 @@ async function main() {
       workspaceId: workspace.id,
       name: 'PayStream Gateway ── Core Banking & Resilience Suite',
       description: 'Validação de ponta a ponta dos endpoints transacionais do PayStream: healthcheck de liveness, login com JWT, ledger de transações, split de sellers e disparo de webhook assinado HMAC-SHA256.',
-      baseUrl: 'https://paystream-gateway-server.onrender.com/api/v1',
+      baseUrl: 'https://paystream-gateway.onrender.com/api/v1',
       headers: JSON.stringify({
         'Accept': 'application/json',
         'X-Client-Auditor': 'Spectr-TestOps-v1'
