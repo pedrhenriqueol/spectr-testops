@@ -93,6 +93,12 @@ export const App: React.FC = () => {
     await loadData();
   };
 
+  const handleUpdateBaseUrl = async (newUrl: string) => {
+    if (!selectedSuite) return;
+    await api.patch(`/suites/${selectedSuite.id}`, { baseUrl: newUrl });
+    await loadData();
+  };
+
   const handleRunDemo = async () => {
     if (suites.length > 0) {
       setActiveView('workstation');
@@ -116,11 +122,12 @@ export const App: React.FC = () => {
         
         {/* Workbench Top Bar */}
         <WorkbenchHeader
-          selectedSuite={selectedSuite}
+          suite={selectedSuite}
           latestRun={latestRun}
           isExecuting={isExecuting}
           onRunSuite={() => selectedSuite && handleRunSuite(selectedSuite.id)}
           onOpenCreateModal={() => setIsCreateModalOpen(true)}
+          onUpdateBaseUrl={handleUpdateBaseUrl}
         />
 
         {/* Dynamic View Panel */}

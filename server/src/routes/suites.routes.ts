@@ -101,6 +101,27 @@ export async function suitesRoutes(app: FastifyInstance) {
     return reply.status(201).send({ testCase });
   });
 
+  // Atualiza suíte (nome, baseUrl, descrição)
+  app.patch('/:id', async (request, reply) => {
+    const paramsSchema = z.object({ id: z.string().uuid() });
+    const { id } = paramsSchema.parse(request.params);
+
+    const schema = z.object({
+      name: z.string().min(2).optional(),
+      description: z.string().optional(),
+      baseUrl: z.string().url('Base URL inválida').optional()
+    });
+
+    const body = schema.parse(request.body);
+
+    const suite = await prisma.testSuite.update({
+      where: { id },
+      data: body
+    });
+
+    return reply.send({ suite });
+  });
+
   // Deleta suíte
   app.delete('/:id', async (request, reply) => {
     const paramsSchema = z.object({ id: z.string().uuid() });
