@@ -1,11 +1,30 @@
 import React, { useRef, useEffect } from 'react';
 import { 
   Terminal, Search, Sun, Moon, Play, Layers, 
-  ChevronDown, Globe, Zap, Sliders, Database, Command
+  ChevronDown, Globe, Zap, Sliders, Database
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
+import { useToast } from '../context/ToastContext';
 import { TestSuite } from '../types';
 import { motion } from 'framer-motion';
+
+export const ENVIRONMENTS_MAP: Record<string, { name: string; url: string; badge: string }> = {
+  production: {
+    name: 'Production (Render Cloud)',
+    url: 'https://paystream-gateway.onrender.com/api/v1',
+    badge: 'Render'
+  },
+  staging: {
+    name: 'Staging Cluster',
+    url: 'https://staging-api.spectr-ops.internal/api/v1',
+    badge: 'Staging'
+  },
+  local: {
+    name: 'Localhost (Port 3334)',
+    url: 'http://localhost:3334/api/v1',
+    badge: 'Local'
+  }
+};
 
 interface PostmanTopNavProps {
   activeView: 'workstation' | 'chaos' | 'history';
@@ -33,6 +52,7 @@ export const PostmanTopNav: React.FC<PostmanTopNavProps> = ({
   setSearchQuery
 }) => {
   const { theme, toggleTheme } = useTheme();
+  const { showToast } = useToast();
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Shortcut Ctrl+K / Cmd+K para focar imediatamente na busca global
@@ -49,15 +69,28 @@ export const PostmanTopNav: React.FC<PostmanTopNavProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  const handleEnvironmentChange = (newEnv: string) => {
+    setEnvironment(newEnv);
+    const envInfo = ENVIRONMENTS_MAP[newEnv] || ENVIRONMENTS_MAP.production;
+    showToast({
+      type: 'info',
+      title: `Ambiente: ${envInfo.name}`,
+      message: `Variável {{BASE_URL}} sincronizada com ${envInfo.url}`
+    });
+  };
+
   return (
     <header className="h-12 bg-pm-light-sidebar dark:bg-pm-dark-sidebar border-b border-pm-light-border dark:border-pm-dark-border flex items-center justify-between px-3 text-xs z-30 shrink-0 transition-colors duration-200 select-none">
       
       {/* ── Left: Brand & Workspace Selector ── */}
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-2 pr-3 border-r border-pm-light-border dark:border-pm-dark-border">
-          <div className="w-6 h-6 rounded bg-pm-orange flex items-center justify-center text-white font-black text-xs shadow-sm">
+          <motion.div 
+            whileHover={{ rotate: 10, scale: 1.05 }}
+            className="w-6 h-6 rounded bg-pm-orange flex items-center justify-center text-white font-black text-xs shadow-sm cursor-pointer"
+          >
             S
-          </div>
+          </motion.div>
           <span className="font-bold text-sm tracking-tight text-pm-light-text dark:text-pm-dark-text">
             SPECTR <span className="font-mono text-[11px] font-normal text-pm-orange">TestOps</span>
           </span>
@@ -70,21 +103,21 @@ export const PostmanTopNav: React.FC<PostmanTopNavProps> = ({
           <ChevronDown className="w-3 h-3 opacity-50" />
         </div>
 
-        {/* Top Views Segmented Control */}
+        {/* Top Views Segmented Control com Indicador Fluido layoutId */}
         <div className="hidden md:flex items-center bg-pm-light-bg dark:bg-pm-dark-bg p-0.5 rounded border border-pm-light-border dark:border-pm-dark-border relative">
           <button
             onClick={() => setActiveView('workstation')}
             className={`px-3 py-1 rounded text-[11px] font-medium transition-all relative cursor-pointer ${
               activeView === 'workstation'
-                ? 'text-white'
+                ? 'text-white font-semibold'
                 : 'text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-light-text dark:hover:text-pm-dark-text'
             }`}
           >
             {activeView === 'workstation' && (
               <motion.div
-                layoutId="topNavPill"
+                layoutId="activeTabIndicator"
                 className="absolute inset-0 bg-pm-orange rounded shadow-sm"
-                transition={{ type: 'spring', stiffness: 450, damping: 35 }}
+                transition={{ type: 'spring', stiffness: 380, damping: 30 }}
               />
             )}
             <span className="relative z-10 flex items-center gap-1.5">
@@ -97,15 +130,15 @@ export const PostmanTopNav: React.FC<PostmanTopNavProps> = ({
             onClick={() => setActiveView('chaos')}
             className={`px-3 py-1 rounded text-[11px] font-medium transition-all relative cursor-pointer ${
               activeView === 'chaos'
-                ? 'text-white'
+                ? 'text-white font-semibold'
                 : 'text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-light-text dark:hover:text-pm-dark-text'
             }`}
           >
             {activeView === 'chaos' && (
               <motion.div
-                layoutId="topNavPill"
+                layoutId="activeTabIndicator"
                 className="absolute inset-0 bg-pm-orange rounded shadow-sm"
-                transition={{ type: 'spring', stiffness: 450, damping: 35 }}
+                transition={{ type: 'spring', stiffness: 380, damping: 30 }}
               />
             )}
             <span className="relative z-10 flex items-center gap-1.5">
@@ -118,15 +151,15 @@ export const PostmanTopNav: React.FC<PostmanTopNavProps> = ({
             onClick={() => setActiveView('history')}
             className={`px-3 py-1 rounded text-[11px] font-medium transition-all relative cursor-pointer ${
               activeView === 'history'
-                ? 'text-white'
+                ? 'text-white font-semibold'
                 : 'text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-light-text dark:hover:text-pm-dark-text'
             }`}
           >
             {activeView === 'history' && (
               <motion.div
-                layoutId="topNavPill"
+                layoutId="activeTabIndicator"
                 className="absolute inset-0 bg-pm-orange rounded shadow-sm"
-                transition={{ type: 'spring', stiffness: 450, damping: 35 }}
+                transition={{ type: 'spring', stiffness: 380, damping: 30 }}
               />
             )}
             <span className="relative z-10 flex items-center gap-1.5">
@@ -145,7 +178,7 @@ export const PostmanTopNav: React.FC<PostmanTopNavProps> = ({
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Buscar endpoints, coleções ou métodos..."
+          placeholder="Buscar endpoints, rotas (Ctrl+K)..."
           className="w-full pl-8 pr-14 py-1.5 bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border rounded text-[11px] text-pm-light-text dark:text-pm-dark-text placeholder-pm-light-textMuted dark:placeholder-pm-dark-textMuted focus:outline-none focus:border-pm-orange transition-colors"
         />
         <div className="absolute right-2 flex items-center gap-0.5 pointer-events-none">
@@ -158,22 +191,24 @@ export const PostmanTopNav: React.FC<PostmanTopNavProps> = ({
       {/* ── Right: Environment, Theme Switcher, Demo, Run Collection ── */}
       <div className="flex items-center gap-2">
         
-        {/* Environment Selector */}
+        {/* 2. Environment Switcher com Toast Dinâmico */}
         <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border text-[11px] text-pm-light-text dark:text-pm-dark-text">
-          <Globe className="w-3 h-3 text-emerald-500" />
+          <Globe className="w-3 h-3 text-emerald-500 animate-pulse" />
           <select
             value={environment}
-            onChange={(e) => setEnvironment(e.target.value)}
+            onChange={(e) => handleEnvironmentChange(e.target.value)}
             className="bg-transparent focus:outline-none cursor-pointer font-medium"
           >
             <option value="production" className="dark:bg-pm-dark-sidebar">Production (Render Cloud)</option>
-            <option value="local" className="dark:bg-pm-dark-sidebar">Localhost (Dev 3334/3335)</option>
             <option value="staging" className="dark:bg-pm-dark-sidebar">Staging Cluster</option>
+            <option value="local" className="dark:bg-pm-dark-sidebar">Localhost (Port 3334)</option>
           </select>
         </div>
 
-        {/* 1. Theme Switcher Nativo (Light/Dark Postman) ao lado do Environment Selector */}
-        <button
+        {/* 1. Theme Switcher Nativo (Light/Dark Postman) */}
+        <motion.button
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
           onClick={toggleTheme}
           title={theme === 'dark' ? 'Alternar para Tema Claro (Postman White)' : 'Alternar para Tema Escuro (Postman Dark)'}
           className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-pm-light-panel dark:bg-pm-dark-panel hover:bg-pm-light-panelHover dark:hover:bg-pm-dark-panelHover border border-pm-light-border dark:border-pm-dark-border text-pm-light-text dark:text-pm-dark-text transition-colors cursor-pointer"
@@ -189,17 +224,19 @@ export const PostmanTopNav: React.FC<PostmanTopNavProps> = ({
               <span className="text-[11px] font-medium hidden xl:inline">Dark</span>
             </>
           )}
-        </button>
+        </motion.button>
 
         {/* 1-Click Demo Trigger */}
-        <button
+        <motion.button
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
           onClick={onRunDemo}
           title="Executar Bateria Completa PayStream"
           className="px-2.5 py-1 rounded bg-pm-orange/10 hover:bg-pm-orange/20 border border-pm-orange/30 text-pm-orange font-medium text-[11px] flex items-center gap-1 transition-all cursor-pointer"
         >
           <Zap className="w-3 h-3" />
           <span className="hidden sm:inline">PayStream Demo</span>
-        </button>
+        </motion.button>
 
         {/* Primary Run Collection Action */}
         <motion.button

@@ -8,9 +8,11 @@ import { AuditLedger } from './components/AuditLedger';
 import { CreateSuiteModal } from './components/CreateSuiteModal';
 import { CreateEndpointModal } from './components/CreateEndpointModal';
 import { ThemeProvider } from './context/ThemeContext';
+import { ToastProvider, useToast } from './context/ToastContext';
 import { AnimatePresence, motion } from 'framer-motion';
 
 function MainApp() {
+  const { showToast } = useToast();
   const [suites, setSuites] = useState<TestSuite[]>([]);
   const [selectedSuite, setSelectedSuite] = useState<TestSuite | null>(null);
   const [latestRun, setLatestRun] = useState<TestRun | null>(null);
@@ -25,8 +27,8 @@ function MainApp() {
   const loadData = async () => {
     try {
       const [suitesRes, runsRes] = await Promise.all([
-        api.get('/suites'),
-        api.get('/runs?limit=30')
+        api.get('/suites').catch(() => ({ data: { suites: [] } })),
+        api.get('/runs?limit=30').catch(() => ({ data: { runs: [] } }))
       ]);
 
       const loadedSuites: TestSuite[] = suitesRes.data.suites || [];
@@ -42,9 +44,12 @@ function MainApp() {
       const runs: TestRun[] = runsRes.data.runs || [];
       setRunsHistory(runs);
       if (runs.length > 0 && !latestRun) {
-        // Carrega o run mais recente com asserções detalhadas
-        const runDetail = await api.get(`/runs/${runs[0].id}`);
-        setLatestRun(runDetail.data.run);
+        try {
+          const runDetail = await api.get(`/runs/${runs[0].id}`);
+          setLatestRun(runDetail.data.run);
+        } catch {
+          // ignore
+        }
       }
     } catch (err) {
       console.error('Falha ao carregar dados do Fastify:', err);
@@ -58,15 +63,31 @@ function MainApp() {
   const handleRunSuite = async (suiteId: string) => {
     try {
       setIsExecuting(true);
+      showToast({
+        type: 'info',
+        title: 'Executando Suíte de Testes',
+        message: 'Disparando chamadas sequenciais e calculando latência p95/p99...'
+      });
+
       const res = await api.post(`/suites/${suiteId}/run`);
       const runId = res.data.runId;
       
-      // Busca detalhes completos com asserções
       const runDetail = await api.get(`/runs/${runId}`);
       setLatestRun(runDetail.data.run);
       await loadData();
-    } catch (err) {
+
+      showToast({
+        type: runDetail.data.run.status === 'PASSED' ? 'success' : 'warn',
+        title: `Suíte Concluída: ${runDetail.data.run.status}`,
+        message: `${runDetail.data.run.passedTests}/${runDetail.data.run.totalTests} testes aprovados (${runDetail.data.run.successRate}%)`
+      });
+    } catch (err: any) {
       console.error('Erro na execução da suíte:', err);
+      showToast({
+        type: 'error',
+        title: 'Falha na Execução',
+        message: err.message || 'Verifique se o backend Fastify está ativo.'
+      });
     } finally {
       setIsExecuting(false);
     }
@@ -78,24 +99,60 @@ function MainApp() {
       setSelectedSuite(paystreamSuite);
       setActiveView('workstation');
       await handleRunSuite(paystreamSuite.id);
+    } else {
+      showToast({
+        type: 'info',
+        title: 'Demo PayStream',
+        message: 'Carregando suíte PayStream Core Banking...'
+      });
     }
   };
 
   const handleCreateSuite = async (data: { name: string; description?: string; baseUrl: string }) => {
-    await api.post('/suites', data);
-    await loadData();
+    try {
+      await api.post('/suites', data);
+      await loadData();
+      showToast({
+        type: 'success',
+        title: 'Coleção Criada',
+        message: `Suíte "${data.name}" adicionada com sucesso.`
+      });
+    } catch (err: any) {
+      showToast({
+        type: 'error',
+        title: 'Erro ao criar coleção',
+        message: err.message
+      });
+    }
   };
 
   const handleCreateEndpoint = async (data: any) => {
     if (!selectedSuite) return;
-    await api.post(`/suites/${selectedSuite.id}/cases`, data);
-    await loadData();
+    try {
+      await api.post(`/suites/${selectedSuite.id}/cases`, data);
+      await loadData();
+      showToast({
+        type: 'success',
+        title: 'Endpoint Adicionado',
+        message: `[${data.method}] ${data.path} salvo na coleção.`
+      });
+    } catch (err: any) {
+      showToast({
+        type: 'error',
+        title: 'Erro ao adicionar endpoint',
+        message: err.message
+      });
+    }
   };
 
   const handleUpdateBaseUrl = async (newUrl: string) => {
     if (!selectedSuite) return;
-    await api.patch(`/suites/${selectedSuite.id}`, { baseUrl: newUrl });
-    await loadData();
+    try {
+      await api.patch(`/suites/${selectedSuite.id}`, { baseUrl: newUrl });
+      await loadData();
+    } catch (err: any) {
+      console.error(err);
+    }
   };
 
   return (
@@ -115,15 +172,16 @@ function MainApp() {
         setSearchQuery={setSearchQuery}
       />
 
-      {/* 2. Main Workstation Area */}
-      <div className="flex-1 flex overflow-hidden">
+      {/* 2. Main Workstation Area com Transições Fluidas Framer Motion */}
+      <div className="flex-1 flex overflow-hidden relative">
         <AnimatePresence mode="wait">
           {activeView === 'workstation' && (
             <motion.div
               key="workstation"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.18, ease: 'easeOut' }}
               className="flex-1 flex overflow-hidden"
             >
               <Workstation
@@ -138,6 +196,7 @@ function MainApp() {
                 onUpdateBaseUrl={handleUpdateBaseUrl}
                 searchQuery={searchQuery}
                 setSearchQuery={setSearchQuery}
+                environment={environment}
               />
             </motion.div>
           )}
@@ -145,9 +204,10 @@ function MainApp() {
           {activeView === 'chaos' && (
             <motion.div
               key="chaos"
-              initial={{ opacity: 0, y: 5 }}
+              initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -5 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.18, ease: 'easeOut' }}
               className="flex-1 flex overflow-hidden"
             >
               <ChaosLab />
@@ -157,17 +217,22 @@ function MainApp() {
           {activeView === 'history' && (
             <motion.div
               key="history"
-              initial={{ opacity: 0, y: 5 }}
+              initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -5 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.18, ease: 'easeOut' }}
               className="flex-1 flex overflow-hidden"
             >
               <AuditLedger
                 runs={runsHistory}
                 onSelectRun={async (r) => {
-                  const runDetail = await api.get(`/runs/${r.id}`);
-                  setLatestRun(runDetail.data.run);
-                  setActiveView('workstation');
+                  try {
+                    const runDetail = await api.get(`/runs/${r.id}`);
+                    setLatestRun(runDetail.data.run);
+                    setActiveView('workstation');
+                  } catch {
+                    setActiveView('workstation');
+                  }
                 }}
               />
             </motion.div>
@@ -196,7 +261,9 @@ function MainApp() {
 export function App() {
   return (
     <ThemeProvider>
-      <MainApp />
+      <ToastProvider>
+        <MainApp />
+      </ToastProvider>
     </ThemeProvider>
   );
 }
