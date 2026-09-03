@@ -7,7 +7,17 @@ export async function chaosRoutes(app: FastifyInstance) {
     const body = request.body as any;
     const delayMs = Number(query?.delay || body?.delay || 2000);
 
-    await new Promise(resolve => setTimeout(resolve, delayMs));
+    // Delay assíncrono blindado contra memory leaks com liberação imediata em caso de cancelamento do socket
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        resolve();
+      }, Math.min(Math.max(0, delayMs), 30000));
+
+      request.raw.once('close', () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
 
     return reply.send({
       simulated: true,

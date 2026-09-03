@@ -32,6 +32,16 @@ export const CreateEndpointModal: React.FC<CreateEndpointModalProps> = ({
   const [loading, setLoading] = useState(false);
   const { t } = useLanguage();
 
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isOpen) {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const handleFillPaystreamSample = () => {

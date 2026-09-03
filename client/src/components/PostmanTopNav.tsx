@@ -7,6 +7,7 @@ import { useTheme } from '../context/ThemeContext';
 import { useToast } from '../context/ToastContext';
 import { useLanguage, Language } from '../context/LanguageContext';
 import { TestSuite } from '../types';
+import { SpectrLogo } from './SpectrLogo';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export const ENVIRONMENTS_MAP: Record<string, { name: string; url: string; badge: string }> = {
@@ -116,16 +117,8 @@ export const PostmanTopNav: React.FC<PostmanTopNavProps> = ({
       
       {/* ── Left: Brand & Workspace Selector & Segmented View Tabs (Zero CLS) ── */}
       <div className="flex items-center gap-2 shrink-0">
-        <div className="flex items-center gap-2 pr-3 border-r border-pm-light-border dark:border-pm-dark-border">
-          <motion.div 
-            whileHover={{ rotate: 8, scale: 1.05 }}
-            className="w-6 h-6 rounded bg-pm-orange flex items-center justify-center text-white font-black text-xs shadow-sm cursor-pointer"
-          >
-            S
-          </motion.div>
-          <span className="font-bold text-sm tracking-tight text-pm-light-text dark:text-pm-dark-text whitespace-nowrap">
-            SPECTR <span className="font-mono text-[11px] font-normal text-pm-orange">TestOps</span>
-          </span>
+        <div className="flex items-center pr-3 border-r border-pm-light-border dark:border-pm-dark-border">
+          <SpectrLogo />
         </div>
 
         {/* Workspace Dropdown */}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Plus, Search, Play, CheckCircle2, XCircle, Clock, Shield, 
   Terminal, Copy, Check, FileJson, Key, Sliders, AlertTriangle, 
@@ -121,6 +121,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
   // Single Request Runner State
   const [singleResponse, setSingleResponse] = useState<SingleResponse | null>(null);
   const [isSendingSingle, setIsSendingSingle] = useState(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const [responseMode, setResponseMode] = useState<'single' | 'collection'>('single');
   const [activeSingleTab, setActiveSingleTab] = useState<'body' | 'tests' | 'headers'>('body');
   const [activeCollectionTab, setActiveCollectionTab] = useState<'cli' | 'breakdown'>('cli');
@@ -178,19 +179,42 @@ export const Workstation: React.FC<WorkstationProps> = ({
     }
   };
 
-  // 1. DISPARO INDIVIDUAL DE REQUEST (SEND BUTTON & SIMULAÇÃO/EXECUÇÃO REAL)
+  // 1. DISPARO INDIVIDUAL DE REQUEST (SEND BUTTON & SUPORTE A ABORT CONTROLLER)
   const handleSendSingle = async () => {
     if (!currentCase) return;
+
+    // Se já estiver enviando, permite cancelar a requisição em curso
+    if (isSendingSingle && abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      setIsSendingSingle(false);
+      showToast({
+        type: 'info',
+        title: 'Requisição Interrompida',
+        message: 'A chamada HTTP foi cancelada pelo operador.'
+      });
+      return;
+    }
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     try {
       setIsSendingSingle(true);
 
       let resultData: SingleResponse | null = null;
 
       try {
-        // Tenta executar via endpoint dedicado do backend Fastify
-        const res = await api.post(`/cases/${currentCase.id}/run`);
+        // Tenta executar via endpoint dedicado do backend Fastify com sinal de abort
+        const res = await api.post(`/cases/${currentCase.id}/run`, {}, {
+          signal: controller.signal
+        });
         resultData = res.data;
-      } catch (err) {
+      } catch (err: any) {
+        if (err.name === 'CanceledError' || err.name === 'AbortError') {
+          return; // Cancelamento intencional
+        }
+
         // Fallback resiliente no cliente com medição real de latência
         const startTime = performance.now();
         const targetUrl = currentCase.path.startsWith('http')
@@ -213,7 +237,8 @@ export const Workstation: React.FC<WorkstationProps> = ({
           const fetchRes = await fetch(targetUrl, {
             method: currentCase.method,
             headers: currentCase.headers ? JSON.parse(currentCase.headers) : { 'Content-Type': 'application/json' },
-            body: ['POST', 'PUT', 'PATCH'].includes(currentCase.method) ? currentCase.body || undefined : undefined
+            body: ['POST', 'PUT', 'PATCH'].includes(currentCase.method) ? currentCase.body || undefined : undefined,
+            signal: controller.signal
           });
           status = fetchRes.status;
           statusText = fetchRes.statusText || 'OK';
@@ -398,14 +423,15 @@ export const Workstation: React.FC<WorkstationProps> = ({
     });
   };
 
+  // Badges com contraste calibrado para atender WCAG AA (> 4.5:1) em temas Claro e Escuro
   const getMethodBadgeClass = (method: string) => {
     switch (method.toUpperCase()) {
-      case 'GET': return 'bg-pm-get/15 text-pm-get border-pm-get/30';
-      case 'POST': return 'bg-pm-post/15 text-pm-post border-pm-post/30';
-      case 'PUT': return 'bg-pm-put/15 text-pm-put border-pm-put/30';
-      case 'DELETE': return 'bg-pm-delete/15 text-pm-delete border-pm-delete/30';
-      case 'PATCH': return 'bg-pm-patch/15 text-pm-patch border-pm-patch/30';
-      default: return 'bg-slate-500/15 text-slate-400 border-slate-500/30';
+      case 'GET': return 'bg-emerald-500/15 text-[#077E36] dark:text-[#12D468] border-emerald-500/30';
+      case 'POST': return 'bg-pm-orange/15 text-[#D94F1E] dark:text-pm-orange border-pm-orange/30';
+      case 'PUT': return 'bg-blue-500/15 text-[#0762BE] dark:text-sky-400 border-blue-500/30';
+      case 'DELETE': return 'bg-rose-500/15 text-[#C81B10] dark:text-rose-400 border-rose-500/30';
+      case 'PATCH': return 'bg-purple-500/15 text-[#7C3AED] dark:text-purple-400 border-purple-500/30';
+      default: return 'bg-slate-500/15 text-slate-700 dark:text-slate-300 border-slate-500/30';
     }
   };
 

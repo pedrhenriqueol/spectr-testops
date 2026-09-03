@@ -1,12 +1,143 @@
 import { prisma } from '../shared/prisma.js';
 
-interface RunResult {
+export interface LatencyMetrics {
+  p50: number;
+  p90: number;
+  p95: number;
+  p99: number;
+  min: number;
+  max: number;
+  avg: number;
+}
+
+/**
+ * Cálculo estatístico determinístico de percentis de latência (p50, p90, p95, p99)
+ * Utiliza o método Nearest Rank padronizado (NIST / Datadog / K6).
+ */
+export function calculatePercentiles(latencies: number[]): LatencyMetrics {
+  if (!latencies || latencies.length === 0) {
+    return { p50: 0, p90: 0, p95: 0, p99: 0, min: 0, max: 0, avg: 0 };
+  }
+
+  const sorted = [...latencies].sort((a, b) => a - b);
+  const n = sorted.length;
+
+  const getRankValue = (percentile: number) => {
+    const rank = Math.ceil((percentile / 100) * n) - 1;
+    return sorted[Math.max(0, Math.min(n - 1, rank))];
+  };
+
+  const sum = sorted.reduce((acc, val) => acc + val, 0);
+
+  return {
+    p50: getRankValue(50),
+    p90: getRankValue(90),
+    p95: getRankValue(95),
+    p99: getRankValue(99),
+    min: sorted[0],
+    max: sorted[n - 1],
+    avg: Math.round(sum / n)
+  };
+}
+
+export interface ContractValidationResult {
+  valid: boolean;
+  errorMessage: string | null;
+}
+
+/**
+ * Validador recursivo de conformidade OpenAPI / JSON Schema.
+ * Suporta objetos aninhados, arrays tipados, validação de tipos primitivos e campos obrigatórios.
+ */
+export function validateContractSchema(data: any, schema: any, path = 'root'): ContractValidationResult {
+  if (!schema || typeof schema !== 'object') {
+    return { valid: true, errorMessage: null };
+  }
+
+  // 1. Validação de tipo de dado
+  if (schema.type) {
+    const expectedType = schema.type;
+    const actualType = Array.isArray(data) ? 'array' : data === null ? 'null' : typeof data;
+
+    if (expectedType === 'integer') {
+      if (typeof data !== 'number' || !Number.isInteger(data)) {
+        return {
+          valid: false,
+          errorMessage: `Falha de contrato em '${path}': esperado 'integer', recebido '${actualType}' (${data}).`
+        };
+      }
+    } else if (expectedType === 'number') {
+      if (typeof data !== 'number' || isNaN(data)) {
+        return {
+          valid: false,
+          errorMessage: `Falha de contrato em '${path}': esperado 'number', recebido '${actualType}'.`
+        };
+      }
+    } else if (expectedType !== actualType) {
+      return {
+        valid: false,
+        errorMessage: `Falha de contrato em '${path}': esperado '${expectedType}', recebido '${actualType}'.`
+      };
+    }
+  }
+
+  // 2. Validação de campos obrigatórios (required)
+  if (schema.required && Array.isArray(schema.required)) {
+    if (typeof data !== 'object' || data === null) {
+      return {
+        valid: false,
+        errorMessage: `Falha de contrato em '${path}': esperado objeto para verificar campos obrigatórios.`
+      };
+    }
+
+    for (const field of schema.required) {
+      if (data[field] === undefined) {
+        return {
+          valid: false,
+          errorMessage: `Campo obrigatório ausente no contrato: '${path === 'root' ? field : `${path}.${field}`}'.`
+        };
+      }
+    }
+  }
+
+  // 3. Validação de propriedades aninhadas (properties)
+  if (schema.properties && typeof data === 'object' && data !== null && !Array.isArray(data)) {
+    for (const [propName, propSchema] of Object.entries(schema.properties)) {
+      if (data[propName] !== undefined) {
+        const subResult = validateContractSchema(
+          data[propName],
+          propSchema,
+          path === 'root' ? propName : `${path}.${propName}`
+        );
+        if (!subResult.valid) {
+          return subResult;
+        }
+      }
+    }
+  }
+
+  // 4. Validação de arrays tipados (items)
+  if (schema.items && Array.isArray(data)) {
+    for (let i = 0; i < data.length; i++) {
+      const itemResult = validateContractSchema(data[i], schema.items, `${path}[${i}]`);
+      if (!itemResult.valid) {
+        return itemResult;
+      }
+    }
+  }
+
+  return { valid: true, errorMessage: null };
+}
+
+export interface RunResult {
   runId: string;
   status: 'PASSED' | 'FAILED';
   totalTests: number;
   passedTests: number;
   failedTests: number;
   totalDurationMs: number;
+  p50LatencyMs: number;
+  p90LatencyMs: number;
   p95LatencyMs: number;
   p99LatencyMs: number;
   successRate: number;
@@ -124,32 +255,27 @@ export async function executeTestSuite(suiteId: string, workspaceId: string, tri
         responseBody = '';
       }
 
-      // Validação básica de JSON Schema se fornecido
+      // Validação estrita de contrato OpenAPI / JSON Schema
       if (testCase.expectedSchema && responseBody) {
         try {
           const parsed = JSON.parse(responseBody);
           const schema = JSON.parse(testCase.expectedSchema);
-          if (schema.required && Array.isArray(schema.required)) {
-            for (const field of schema.required) {
-              if (parsed[field] === undefined) {
-                schemaValid = false;
-                errorMessage = `Campo obrigatório ausente: ${field}`;
-                break;
-              }
-            }
+          const contractRes = validateContractSchema(parsed, schema);
+          if (!contractRes.valid) {
+            schemaValid = false;
+            errorMessage = contractRes.errorMessage;
           }
         } catch {
           schemaValid = false;
-          errorMessage = 'Falha ao validar schema JSON da resposta.';
+          errorMessage = 'Falha ao validar formato JSON do payload de resposta contra o contrato OpenAPI.';
         }
       }
 
-      // Na nuvem (Render free), se o status HTTP e o schema baterem, consideramos o teste funcional APROVADO, registrando o warning de SLA
       if (statusMatch && schemaValid) {
         passedCount++;
       } else {
         failedCount++;
-        if (!statusMatch) {
+        if (!statusMatch && !errorMessage) {
           errorMessage = `Status HTTP ${actualStatus} recebido, esperado ${testCase.expectedStatus}.`;
         }
       }
@@ -176,7 +302,7 @@ export async function executeTestSuite(suiteId: string, workspaceId: string, tri
       latencies.push(testDuration);
       failedCount++;
       actualStatus = 0;
-      errorMessage = err.name === 'AbortError' ? 'Timeout de rede excedido.' : err.message || 'Falha de conexão.';
+      errorMessage = err.name === 'AbortError' ? 'Timeout de rede excedido (15s).' : err.message || 'Falha de conexão.';
 
       await prisma.testAssertion.create({
         data: {
@@ -199,13 +325,7 @@ export async function executeTestSuite(suiteId: string, workspaceId: string, tri
   }
 
   const totalDuration = Date.now() - startTime;
-
-  // Cálculo de percentis de latência
-  latencies.sort((a, b) => a - b);
-  const p95Index = Math.floor(latencies.length * 0.95);
-  const p99Index = Math.floor(latencies.length * 0.99);
-  const p95 = latencies.length > 0 ? latencies[p95Index] || latencies[latencies.length - 1] : 0;
-  const p99 = latencies.length > 0 ? latencies[p99Index] || latencies[latencies.length - 1] : 0;
+  const metrics = calculatePercentiles(latencies);
 
   const totalTests = suite.cases.length;
   const successRate = totalTests > 0 ? Number(((passedCount / totalTests) * 100).toFixed(1)) : 0;
@@ -218,8 +338,8 @@ export async function executeTestSuite(suiteId: string, workspaceId: string, tri
       passedTests: passedCount,
       failedTests: failedCount,
       totalDurationMs: totalDuration,
-      p95LatencyMs: p95,
-      p99LatencyMs: p99,
+      p95LatencyMs: metrics.p95,
+      p99LatencyMs: metrics.p99,
       successRate,
       completedAt: new Date()
     }
@@ -232,12 +352,13 @@ export async function executeTestSuite(suiteId: string, workspaceId: string, tri
     passedTests: passedCount,
     failedTests: failedCount,
     totalDurationMs: totalDuration,
-    p95LatencyMs: p95,
-    p99LatencyMs: p99,
+    p50LatencyMs: metrics.p50,
+    p90LatencyMs: metrics.p90,
+    p95LatencyMs: metrics.p95,
+    p99LatencyMs: metrics.p99,
     successRate
   };
 }
-
 
 export interface SingleCaseResult {
   caseId: string;
@@ -280,7 +401,6 @@ export async function executeSingleTestCase(caseId: string): Promise<SingleCaseR
     }
   }
 
-  // Se a rota não for pública e a suíte tiver um caso de login, executa login automático para obter o Bearer token
   let dynamicToken: string | null = null;
   const isAuthCase = testCase.path.includes('/auth/login') || testCase.path.includes('/login');
   if (!isAuthCase) {
@@ -311,7 +431,7 @@ export async function executeSingleTestCase(caseId: string): Promise<SingleCaseR
             dynamicToken = loginData.token;
           }
         }
-      } catch (err) {
+      } catch {
         // ignora falha de auto-login e prossegue
       }
     }
@@ -389,21 +509,18 @@ export async function executeSingleTestCase(caseId: string): Promise<SingleCaseR
       // não é JSON
     }
 
-    // Validação de JSON Schema se configurado
+    // Validação estrita de JSON Schema / OpenAPI
     if (testCase.expectedSchema && parsedBody && typeof parsedBody === 'object') {
       try {
         const schema = JSON.parse(testCase.expectedSchema);
-        if (schema.required && Array.isArray(schema.required)) {
-          for (const field of schema.required) {
-            if (parsedBody[field] === undefined) {
-              schemaValid = false;
-              errorMessage = `Campo obrigatório ausente no contrato: ${field}`;
-              break;
-            }
-          }
+        const contractRes = validateContractSchema(parsedBody, schema);
+        if (!contractRes.valid) {
+          schemaValid = false;
+          errorMessage = contractRes.errorMessage;
         }
       } catch {
         schemaValid = false;
+        errorMessage = 'Schema JSON configurado no teste é inválido.';
       }
     }
 
