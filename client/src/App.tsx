@@ -9,6 +9,7 @@ import { CreateSuiteModal } from './components/CreateSuiteModal';
 import { CreateEndpointModal } from './components/CreateEndpointModal';
 import { ThemeProvider } from './context/ThemeContext';
 import { ToastProvider, useToast } from './context/ToastContext';
+import { LanguageProvider, useLanguage } from './context/LanguageContext';
 import { motion } from 'framer-motion';
 
 function MainApp() {
@@ -256,9 +257,11 @@ function MainApp() {
 export function App() {
   return (
     <ThemeProvider>
-      <ToastProvider>
-        <MainApp />
-      </ToastProvider>
+      <LanguageProvider>
+        <ToastProvider>
+          <MainApp />
+        </ToastProvider>
+      </LanguageProvider>
     </ThemeProvider>
   );
 }

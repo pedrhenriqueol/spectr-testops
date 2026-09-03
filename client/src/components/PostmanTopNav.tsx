@@ -1,10 +1,11 @@
 import React, { useRef, useEffect } from 'react';
 import { 
   Terminal, Search, Sun, Moon, Play, Layers, 
-  ChevronDown, Globe, Zap, Sliders, Database
+  ChevronDown, Globe, Zap, Sliders, Database, Languages
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { useToast } from '../context/ToastContext';
+import { useLanguage } from '../context/LanguageContext';
 import { TestSuite } from '../types';
 import { motion } from 'framer-motion';
 
@@ -53,6 +54,7 @@ export const PostmanTopNav: React.FC<PostmanTopNavProps> = ({
 }) => {
   const { theme, toggleTheme } = useTheme();
   const { showToast } = useToast();
+  const { language, toggleLanguage, t } = useLanguage();
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Shortcut Ctrl+K / Cmd+K para focar imediatamente na busca global
@@ -74,8 +76,8 @@ export const PostmanTopNav: React.FC<PostmanTopNavProps> = ({
     const envInfo = ENVIRONMENTS_MAP[newEnv] || ENVIRONMENTS_MAP.production;
     showToast({
       type: 'info',
-      title: `Ambiente: ${envInfo.name}`,
-      message: `Variável {{BASE_URL}} sincronizada com ${envInfo.url}`
+      title: `${t.toastEnvChanged}: ${envInfo.name}`,
+      message: `{{BASE_URL}} -> ${envInfo.url}`
     });
   };
 
@@ -99,7 +101,7 @@ export const PostmanTopNav: React.FC<PostmanTopNavProps> = ({
         {/* Workspace Dropdown */}
         <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border hover:border-pm-orange/50 transition-colors cursor-pointer text-pm-light-text dark:text-pm-dark-text">
           <Layers className="w-3.5 h-3.5 text-pm-orange" />
-          <span className="font-medium text-[11px]">Enterprise QA Workspace</span>
+          <span className="font-medium text-[11px]">{t.workspaceTitle}</span>
           <ChevronDown className="w-3 h-3 opacity-50" />
         </div>
 
@@ -122,7 +124,7 @@ export const PostmanTopNav: React.FC<PostmanTopNavProps> = ({
             )}
             <span className="relative z-10 flex items-center gap-1.5">
               <Terminal className="w-3 h-3" />
-              Collections & Requests
+              {t.collectionsTab}
             </span>
           </button>
 
@@ -143,7 +145,7 @@ export const PostmanTopNav: React.FC<PostmanTopNavProps> = ({
             )}
             <span className="relative z-10 flex items-center gap-1.5">
               <Sliders className="w-3 h-3" />
-              Chaos Lab
+              {t.chaosTab}
             </span>
           </button>
 
@@ -164,7 +166,7 @@ export const PostmanTopNav: React.FC<PostmanTopNavProps> = ({
             )}
             <span className="relative z-10 flex items-center gap-1.5">
               <Database className="w-3 h-3" />
-              Audit Ledger
+              {t.auditTab}
             </span>
           </button>
         </div>
@@ -178,7 +180,7 @@ export const PostmanTopNav: React.FC<PostmanTopNavProps> = ({
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Buscar endpoints, rotas (Ctrl+K)..."
+          placeholder={t.searchPlaceholder}
           className="w-full pl-8 pr-14 py-1.5 bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border rounded text-[11px] text-pm-light-text dark:text-pm-dark-text placeholder-pm-light-textMuted dark:placeholder-pm-dark-textMuted focus:outline-none focus:border-pm-orange transition-colors"
         />
         <div className="absolute right-2 flex items-center gap-0.5 pointer-events-none">
@@ -188,9 +190,21 @@ export const PostmanTopNav: React.FC<PostmanTopNavProps> = ({
         </div>
       </div>
 
-      {/* ── Right: Environment, Theme Switcher, Demo, Run Collection ── */}
+      {/* ── Right: Language Switcher, Environment, Theme Switcher, Demo, Run Collection ── */}
       <div className="flex items-center gap-2">
         
+        {/* Language Switcher (BR / EN) */}
+        <motion.button
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={toggleLanguage}
+          title={language === 'pt' ? 'Switch to English (EN)' : 'Mudar para Português (BR)'}
+          className="flex items-center gap-1.5 px-2 py-1 rounded bg-pm-light-panel dark:bg-pm-dark-panel hover:bg-pm-light-panelHover dark:hover:bg-pm-dark-panelHover border border-pm-light-border dark:border-pm-dark-border text-pm-light-text dark:text-pm-dark-text transition-colors cursor-pointer font-bold font-mono text-[10px]"
+        >
+          <Languages className="w-3.5 h-3.5 text-pm-orange" />
+          <span>{language === 'pt' ? 'BR' : 'EN'}</span>
+        </motion.button>
+
         {/* 2. Environment Switcher com Toast Dinâmico */}
         <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border text-[11px] text-pm-light-text dark:text-pm-dark-text">
           <Globe className="w-3 h-3 text-emerald-500 animate-pulse" />
@@ -199,9 +213,9 @@ export const PostmanTopNav: React.FC<PostmanTopNavProps> = ({
             onChange={(e) => handleEnvironmentChange(e.target.value)}
             className="bg-transparent focus:outline-none cursor-pointer font-medium"
           >
-            <option value="production" className="dark:bg-pm-dark-sidebar">Production (Render Cloud)</option>
-            <option value="staging" className="dark:bg-pm-dark-sidebar">Staging Cluster</option>
-            <option value="local" className="dark:bg-pm-dark-sidebar">Localhost (Port 3334)</option>
+            <option value="production" className="dark:bg-pm-dark-sidebar">{t.envProduction}</option>
+            <option value="staging" className="dark:bg-pm-dark-sidebar">{t.envStaging}</option>
+            <option value="local" className="dark:bg-pm-dark-sidebar">{t.envLocal}</option>
           </select>
         </div>
 
@@ -210,18 +224,18 @@ export const PostmanTopNav: React.FC<PostmanTopNavProps> = ({
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
           onClick={toggleTheme}
-          title={theme === 'dark' ? 'Alternar para Tema Claro (Postman White)' : 'Alternar para Tema Escuro (Postman Dark)'}
+          title={theme === 'dark' ? 'Tema Claro' : 'Tema Escuro'}
           className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-pm-light-panel dark:bg-pm-dark-panel hover:bg-pm-light-panelHover dark:hover:bg-pm-dark-panelHover border border-pm-light-border dark:border-pm-dark-border text-pm-light-text dark:text-pm-dark-text transition-colors cursor-pointer"
         >
           {theme === 'dark' ? (
             <>
               <Sun className="w-3.5 h-3.5 text-amber-400" />
-              <span className="text-[11px] font-medium hidden xl:inline">Light</span>
+              <span className="text-[11px] font-medium hidden xl:inline">{t.themeLight}</span>
             </>
           ) : (
             <>
               <Moon className="w-3.5 h-3.5 text-slate-700" />
-              <span className="text-[11px] font-medium hidden xl:inline">Dark</span>
+              <span className="text-[11px] font-medium hidden xl:inline">{t.themeDark}</span>
             </>
           )}
         </motion.button>
@@ -235,7 +249,7 @@ export const PostmanTopNav: React.FC<PostmanTopNavProps> = ({
           className="px-2.5 py-1 rounded bg-pm-orange/10 hover:bg-pm-orange/20 border border-pm-orange/30 text-pm-orange font-medium text-[11px] flex items-center gap-1 transition-all cursor-pointer"
         >
           <Zap className="w-3 h-3" />
-          <span className="hidden sm:inline">PayStream Demo</span>
+          <span className="hidden sm:inline">{t.paystreamDemo}</span>
         </motion.button>
 
         {/* Primary Run Collection Action */}
@@ -247,7 +261,7 @@ export const PostmanTopNav: React.FC<PostmanTopNavProps> = ({
           className="px-3.5 py-1.5 bg-pm-orange hover:bg-pm-orangeHover disabled:opacity-50 text-white font-semibold rounded text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer font-sans"
         >
           <Play className={`w-3 h-3 ${isExecuting ? 'animate-spin' : 'fill-white'}`} />
-          <span>{isExecuting ? 'Running...' : 'Run Collection'}</span>
+          <span>{isExecuting ? t.running : t.runCollection}</span>
           <kbd className="hidden md:inline-block px-1 py-0.2 bg-black/20 rounded text-[10px] text-orange-100">
             ⌘R
           </kbd>

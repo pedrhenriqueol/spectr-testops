@@ -1,3 +1,4 @@
+import { useLanguage } from '../context/LanguageContext';
 import React, { useState } from 'react';
 import { X, Plus, Send } from 'lucide-react';
 import { HttpMethod } from '../types';
@@ -29,6 +30,7 @@ export const CreateEndpointModal: React.FC<CreateEndpointModalProps> = ({
   const [maxLatencyMs, setMaxLatencyMs] = useState(300);
   const [body, setBody] = useState('');
   const [loading, setLoading] = useState(false);
+  const { t } = useLanguage();
 
   if (!isOpen) return null;
 

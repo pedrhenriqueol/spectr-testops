@@ -2,6 +2,7 @@ import React from 'react';
 import { Database, Clock, CheckCircle2, XCircle, ArrowUpRight, Activity, ShieldCheck } from 'lucide-react';
 import { TestRun } from '../types';
 import { motion } from 'framer-motion';
+import { useLanguage } from '../context/LanguageContext';
 
 interface AuditLedgerProps {
   runs?: TestRun[];
@@ -9,6 +10,7 @@ interface AuditLedgerProps {
 }
 
 export const AuditLedger: React.FC<AuditLedgerProps> = ({ runs = [], onSelectRun }) => {
+  const { t } = useLanguage();
   const safeRuns = Array.isArray(runs) && runs.length > 0 ? runs : [
     {
       id: 'run_ps_live_01',
@@ -56,16 +58,16 @@ export const AuditLedger: React.FC<AuditLedgerProps> = ({ runs = [], onSelectRun
               Audit Ledger & Test Run History
             </h2>
             <p className="text-xs text-pm-light-textMuted dark:text-pm-dark-textMuted mt-0.5">
-              Registro histórico imutável das baterias de testes com telemetria p95, taxas de sucesso e conformidade SLA.
+              {t.auditSubtitle}
             </p>
           </div>
           <div className="flex items-center gap-2">
             <span className="text-xs font-mono px-2.5 py-1 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border text-pm-light-text dark:text-pm-dark-text">
-              Total Execuções: <strong>{safeRuns.length}</strong>
+              {t.totalExecutions}: <strong>{safeRuns.length}</strong>
             </span>
             <span className="text-xs font-mono px-2.5 py-1 rounded bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 flex items-center gap-1 font-semibold">
               <ShieldCheck className="w-3.5 h-3.5" />
-              Audit Ledger Verificado
+              {t.auditVerifiedBadge}
             </span>
           </div>
         </div>
@@ -75,14 +77,14 @@ export const AuditLedger: React.FC<AuditLedgerProps> = ({ runs = [], onSelectRun
           <table className="w-full text-left font-mono text-xs">
             <thead className="bg-pm-light-panel dark:bg-pm-dark-panel border-b border-pm-light-border dark:border-pm-dark-border text-[10px] text-pm-light-textMuted dark:text-pm-dark-textMuted uppercase">
               <tr>
-                <th className="px-4 py-2.5">Run ID</th>
-                <th className="px-4 py-2.5">Status</th>
-                <th className="px-4 py-2.5">Suíte Alvo</th>
-                <th className="px-4 py-2.5">Pass/Total</th>
-                <th className="px-4 py-2.5">Taxa (%)</th>
-                <th className="px-4 py-2.5">p95 Latência</th>
-                <th className="px-4 py-2.5">Duração</th>
-                <th className="px-4 py-2.5 text-right">Data / Hora</th>
+                <th className="px-4 py-2.5">{t.colRunId}</th>
+                <th className="px-4 py-2.5">{t.colStatus}</th>
+                <th className="px-4 py-2.5">{t.colTargetSuite}</th>
+                <th className="px-4 py-2.5">{t.colPassTotal}</th>
+                <th className="px-4 py-2.5">{t.colSuccessRate}</th>
+                <th className="px-4 py-2.5">{t.colP95}</th>
+                <th className="px-4 py-2.5">{t.colDuration}</th>
+                <th className="px-4 py-2.5 text-right">{t.colDateTime}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-pm-light-border dark:divide-pm-dark-border text-[11px]">

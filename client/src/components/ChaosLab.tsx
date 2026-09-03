@@ -2,10 +2,12 @@ import React, { useState } from 'react';
 import { Sliders, Zap, AlertTriangle, Clock, RefreshCw, Terminal, Activity, Play, CheckCircle2 } from 'lucide-react';
 import { api } from '../api/client';
 import { useToast } from '../context/ToastContext';
+import { useLanguage } from '../context/LanguageContext';
 import { motion } from 'framer-motion';
 
 export const ChaosLab: React.FC = () => {
   const { showToast } = useToast();
+  const { t } = useLanguage();
   const [delay, setDelay] = useState(350);
   const [errorCode, setErrorCode] = useState(503);
   const [loading, setLoading] = useState(false);
@@ -144,12 +146,12 @@ export const ChaosLab: React.FC = () => {
               Postman Chaos Engineering Lab
             </h2>
             <p className="text-xs text-pm-light-textMuted dark:text-pm-dark-textMuted mt-1">
-              Simule falhas de infraestrutura, alta latência de rede e intermitências controladas contra APIs e microsserviços.
+              {t.chaosSubtitle}
             </p>
           </div>
           <span className="px-2.5 py-1 rounded bg-pm-orange/10 border border-pm-orange/30 text-pm-orange font-mono text-[11px] font-semibold flex items-center gap-1.5">
             <Activity className="w-3.5 h-3.5" />
-            Chaos Engine v10.4 Active
+            {t.chaosEngineActive}
           </span>
         </div>
 
@@ -205,7 +207,7 @@ export const ChaosLab: React.FC = () => {
                 className="w-full py-2 bg-pm-orange hover:bg-pm-orangeHover disabled:opacity-50 text-white font-semibold rounded text-xs transition-all cursor-pointer font-sans flex items-center justify-center gap-1.5"
               >
                 <Play className={'w-3 h-3 ' + (loading ? 'animate-spin' : '')} />
-                <span>Injetar Atraso de Rede</span>
+                <span>{t.injectLatencyBtn}</span>
               </button>
             </motion.div>
 
@@ -250,7 +252,7 @@ export const ChaosLab: React.FC = () => {
                 className="w-full py-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white font-semibold rounded text-xs transition-all cursor-pointer font-sans flex items-center justify-center gap-1.5"
               >
                 <Zap className="w-3 h-3" />
-                <span>Disparar Falha de Infraestrutura</span>
+                <span>{t.triggerFaultBtn}</span>
               </button>
             </motion.div>
 
@@ -264,7 +266,7 @@ export const ChaosLab: React.FC = () => {
                 Stochastic Flaky Simulation
               </span>
               <p className="text-[11px] text-pm-light-textMuted dark:text-pm-dark-textMuted">
-                Simula oscilações aleatórias na rota com taxa de descarte de 50%.
+                {t.stochasticSubtitle}
               </p>
               <button
                 onClick={handleTestFlaky}
@@ -272,7 +274,7 @@ export const ChaosLab: React.FC = () => {
                 className="w-full py-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white font-semibold rounded text-xs transition-all cursor-pointer font-sans flex items-center justify-center gap-1.5"
               >
                 <RefreshCw className={'w-3 h-3 ' + (loading ? 'animate-spin' : '')} />
-                <span>Testar Flaky Connection</span>
+                <span>{t.testFlakyBtn}</span>
               </button>
             </motion.div>
 
@@ -297,7 +299,7 @@ export const ChaosLab: React.FC = () => {
               {loading ? (
                 <div className="py-12 text-center space-y-2">
                   <div className="inline-block w-4 h-4 rounded-full border-2 border-pm-orange border-t-transparent animate-spin" />
-                  <p className="text-pm-orange font-bold">Injetando caos e aguardando resposta da camada de rede...</p>
+                  <p className="text-pm-orange font-bold">{t.injectingChaosWait}</p>
                 </div>
               ) : output ? (
                 <pre className="overflow-x-auto whitespace-pre-wrap">
@@ -305,7 +307,7 @@ export const ChaosLab: React.FC = () => {
                 </pre>
               ) : (
                 <div className="py-12 text-center text-pm-light-textMuted dark:text-pm-dark-textMuted">
-                  Nenhum teste de caos disparado. Escolha um dos controles à esquerda para testar.
+                  {t.noChaosFiredYet}
                 </div>
               )}
             </div>

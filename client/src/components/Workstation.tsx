@@ -8,6 +8,7 @@ import {
 import { TestSuite, TestCase, TestRun, HttpMethod, SingleResponse } from '../types';
 import { api } from '../api/client';
 import { useToast } from '../context/ToastContext';
+import { useLanguage } from '../context/LanguageContext';
 import { ENVIRONMENTS_MAP } from './PostmanTopNav';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -112,6 +113,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
   environment = 'production'
 }) => {
   const { showToast } = useToast();
+  const { t } = useLanguage();
   const [selectedCase, setSelectedCase] = useState<TestCase | null>(null);
   const [localSearch, setLocalSearch] = useState('');
   const [activeRequestTab, setActiveRequestTab] = useState<'assertions' | 'headers' | 'body' | 'schema'>('assertions');
@@ -439,7 +441,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
                 className="px-2 py-1 rounded bg-pm-orange/15 hover:bg-pm-orange/25 border border-pm-orange/40 text-pm-orange text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer disabled:opacity-40"
               >
                 <Plus className="w-3 h-3" />
-                <span>Request</span>
+                <span>{t.requestBtn}</span>
               </button>
               <button
                 onClick={onOpenCreateModal}
@@ -447,7 +449,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
                 className="p-1 rounded bg-pm-light-panel dark:bg-pm-dark-panel hover:bg-pm-light-panelHover dark:hover:bg-pm-dark-panelHover border border-pm-light-border dark:border-pm-dark-border text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-light-text dark:hover:text-pm-dark-text transition-colors text-[10px] flex items-center gap-1 cursor-pointer"
               >
                 <Plus className="w-3 h-3" />
-                <span>Collection</span>
+                <span>{t.collectionBtn}</span>
               </button>
             </div>
           </div>
@@ -462,7 +464,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
                 setLocalSearch(e.target.value);
                 if (setSearchQuery) setSearchQuery(e.target.value);
               }}
-              placeholder="Filtrar por nome, rota ou método..."
+              placeholder={t.filterPlaceholder}
               className="w-full pl-8 pr-12 py-1.5 bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border rounded text-[11px] text-pm-light-text dark:text-pm-dark-text placeholder-pm-light-textMuted dark:placeholder-pm-dark-textMuted focus:outline-none focus:border-pm-orange"
             />
             {activeQuery && (
@@ -514,7 +516,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
               <div className="pl-3 space-y-0.5">
                 {filteredCases.length === 0 ? (
                   <p className="py-4 text-center text-xs text-pm-light-textMuted dark:text-pm-dark-textMuted">
-                    Nenhum request coincide com a busca.
+                    {t.noRequestsFound}
                   </p>
                 ) : (
                   filteredCases.map((c) => {
@@ -548,13 +550,13 @@ export const Workstation: React.FC<WorkstationProps> = ({
               </div>
             </div>
           ) : (
-            <p className="p-4 text-center text-xs text-pm-light-textMuted dark:text-pm-dark-textMuted">Selecione uma coleção.</p>
+            <p className="p-4 text-center text-xs text-pm-light-textMuted dark:text-pm-dark-textMuted">{t.selectCollectionPrompt}</p>
           )}
         </div>
 
         {/* Sidebar Footer */}
         <div className="p-2.5 border-t border-pm-light-border dark:border-pm-dark-border bg-pm-light-panel dark:bg-pm-dark-panel flex items-center justify-between text-[10px] font-mono text-pm-light-textMuted dark:text-pm-dark-textMuted">
-          <span>{filteredCases.length} endpoints prontos</span>
+          <span>{filteredCases.length} {t.endpointsReady}</span>
           <span className="text-pm-orange font-medium flex items-center gap-1">
             <Globe className="w-2.5 h-2.5" />
             {activeEnvConfig.badge}
@@ -580,7 +582,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
               <div 
                 className="flex-1 flex items-center bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border rounded px-3 py-1.5 text-xs font-mono overflow-hidden relative group cursor-text"
                 onClick={() => setShowResolvedUrl(!showResolvedUrl)}
-                title="Clique para alternar entre {{BASE_URL}} e URL resolvida"
+                title={t.clickToToggleUrl}
               >
                 <span className="text-pm-orange font-bold mr-1 select-none">
                   {showResolvedUrl ? effectiveBaseUrl.replace(/\/+$/, '') : '{{BASE_URL}}'}
@@ -598,7 +600,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
                   className="bg-transparent text-pm-light-text dark:text-pm-dark-text font-semibold flex-1 focus:outline-none cursor-pointer"
                 />
                 <span className="text-[10px] text-pm-light-textMuted dark:text-pm-dark-textMuted font-mono hidden md:inline ml-2 opacity-50">
-                  Enter ↵ to Send
+                  {t.enterToSendHint}
                 </span>
               </div>
 
@@ -611,11 +613,11 @@ export const Workstation: React.FC<WorkstationProps> = ({
                 className="px-4 py-1.5 bg-pm-orange hover:bg-pm-orangeHover disabled:opacity-50 text-white font-semibold rounded text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer font-sans"
               >
                 <Send className={`w-3.5 h-3.5 ${isSendingSingle ? 'animate-spin' : ''}`} />
-                <span>{isSendingSingle ? 'Sending...' : 'Send'}</span>
+                <span>{isSendingSingle ? t.sendingBtn : t.sendBtn}</span>
               </motion.button>
             </>
           ) : (
-            <span className="text-xs text-pm-light-textMuted dark:text-pm-dark-textMuted">Nenhuma requisição selecionada</span>
+            <span className="text-xs text-pm-light-textMuted dark:text-pm-dark-textMuted">{t.noRequestSelected}</span>
           )}
         </div>
 
@@ -623,7 +625,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
         {selectedSuite && (
           <div className="px-3 py-1.5 bg-pm-light-panel dark:bg-pm-dark-panel border-b border-pm-light-border dark:border-pm-dark-border flex items-center justify-between text-[11px] font-mono">
             <div className="flex items-center gap-2">
-              <span className="text-pm-light-textMuted dark:text-pm-dark-textMuted font-bold">AMBIENTE:</span>
+              <span className="text-pm-light-textMuted dark:text-pm-dark-textMuted font-bold">{t.activeEnvLabel}:</span>
               <span className="px-1.5 py-0.5 rounded bg-pm-orange/15 text-pm-orange font-bold text-[10px] border border-pm-orange/30">
                 {activeEnvConfig.name}
               </span>
@@ -634,9 +636,9 @@ export const Workstation: React.FC<WorkstationProps> = ({
             </div>
 
             <div className="flex items-center gap-3 text-pm-light-textMuted dark:text-pm-dark-textMuted">
-              <span>Status Esperado: <strong className="text-emerald-500 font-bold">{currentCase?.expectedStatus || 200} OK</strong></span>
+              <span>{t.expectedStatusLabel}: <strong className="text-emerald-500 font-bold">{currentCase?.expectedStatus || 200} OK</strong></span>
               <span>•</span>
-              <span>SLA Target: <strong className="text-pm-orange">{currentCase?.maxLatencyMs || 250}ms</strong></span>
+              <span>{t.slaTargetLabel}: <strong className="text-pm-orange">{currentCase?.maxLatencyMs || 250}ms</strong></span>
             </div>
           </div>
         )}
@@ -644,10 +646,10 @@ export const Workstation: React.FC<WorkstationProps> = ({
         {/* 3. Request Settings Tabs com layoutId Indicador Fluido */}
         <div className="border-b border-pm-light-border dark:border-pm-dark-border bg-pm-light-surface dark:bg-pm-dark-surface px-3 flex items-center gap-1 text-xs relative">
           {[
-            { id: 'assertions', label: 'Assertions & SLA', count: 2 },
-            { id: 'headers', label: 'Headers', count: 3 },
-            { id: 'body', label: 'Body (JSON)', count: currentCase?.body ? 1 : 0 },
-            { id: 'schema', label: 'Contract Schema', count: currentCase?.expectedSchema ? 1 : 0 },
+            { id: 'assertions', label: t.tabAssertions, count: 2 },
+            { id: 'headers', label: t.tabHeaders, count: 3 },
+            { id: 'body', label: t.tabBody, count: currentCase?.body ? 1 : 0 },
+            { id: 'schema', label: t.tabSchema, count: currentCase?.expectedSchema ? 1 : 0 },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -692,7 +694,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
                 <div className="flex items-center justify-between p-2 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border">
                   <div className="flex items-center gap-2">
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                    <span>Status Code Check</span>
+                    <span>{t.statusCodeCheck}</span>
                   </div>
                   <span className="text-emerald-500 font-bold">pm.response.to.have.status({currentCase?.expectedStatus || 200})</span>
                 </div>
@@ -700,7 +702,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
                 <div className="flex items-center justify-between p-2 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border">
                   <div className="flex items-center gap-2">
                     <Clock className="w-3.5 h-3.5 text-pm-orange" />
-                    <span>Response Time SLA Threshold</span>
+                    <span>{t.latencySlaCheck}</span>
                   </div>
                   <span className="text-pm-orange font-bold">pm.response.responseTime &lt; {currentCase?.maxLatencyMs || 250}ms</span>
                 </div>
@@ -748,7 +750,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
                     <JsonSyntaxView data={JSON.parse(currentCase.body)} raw={currentCase.body} />
                   </div>
                 ) : (
-                  <p className="text-pm-light-textMuted dark:text-pm-dark-textMuted py-4 text-center">Nenhum payload JSON configurado para este request.</p>
+                  <p className="text-pm-light-textMuted dark:text-pm-dark-textMuted py-4 text-center">{t.noBodyConfigured}</p>
                 )}
               </motion.div>
             )}
@@ -766,7 +768,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
                     {currentCase.expectedSchema}
                   </pre>
                 ) : (
-                  <p className="text-pm-light-textMuted dark:text-pm-dark-textMuted py-4 text-center">Validação automática de contrato ativo (status 200 OK).</p>
+                  <p className="text-pm-light-textMuted dark:text-pm-dark-textMuted py-4 text-center">{t.autoContractValidation}</p>
                 )}
               </motion.div>
             )}
@@ -800,7 +802,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
                       transition={{ type: 'spring', stiffness: 380, damping: 30 }}
                     />
                   )}
-                  <span className="relative z-10">⚡ Single Response</span>
+                  <span className="relative z-10">{t.modeSingleResponse}</span>
                 </button>
 
                 <button
@@ -818,7 +820,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
                       transition={{ type: 'spring', stiffness: 380, damping: 30 }}
                     />
                   )}
-                  <span className="relative z-10">📋 Collection Runner</span>
+                  <span className="relative z-10">{t.modeCollectionRunner}</span>
                 </button>
               </div>
 
@@ -826,9 +828,9 @@ export const Workstation: React.FC<WorkstationProps> = ({
               {responseMode === 'single' ? (
                 <div className="flex items-center gap-1 pl-2 border-l border-pm-light-border dark:border-pm-dark-border relative">
                   {[
-                    { id: 'body', label: 'Body (JSON)' },
-                    { id: 'tests', label: 'Test Results' },
-                    { id: 'headers', label: `Headers (${singleResponse ? Object.keys(singleResponse.responseHeaders).length : 0})` }
+                    { id: 'body', label: t.subtabBody },
+                    { id: 'tests', label: t.subtabTestResults },
+                    { id: 'headers', label: `${t.subtabHeaders} (${singleResponse ? Object.keys(singleResponse.responseHeaders).length : 0})` }
                   ].map(tab => (
                     <button
                       key={tab.id}
@@ -860,7 +862,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
                         : 'text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-light-text dark:hover:text-pm-dark-text'
                     }`}
                   >
-                    CLI Stream
+                    {t.subtabCliStream}
                   </button>
                   <button
                     onClick={() => setActiveCollectionTab('breakdown')}
@@ -870,7 +872,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
                         : 'text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-light-text dark:hover:text-pm-dark-text'
                     }`}
                   >
-                    Breakdown ({latestRun?.assertions?.length || 0})
+                    {t.subtabBreakdown} ({latestRun?.assertions?.length || 0})
                   </button>
                 </div>
               )}
@@ -892,13 +894,13 @@ export const Workstation: React.FC<WorkstationProps> = ({
                         : 'bg-rose-500/15 text-rose-500 border-rose-500/30'
                     }`}
                   >
-                    Status: {singleResponse.actualStatus} {singleResponse.statusText}
+                    {t.statusLabel}: {singleResponse.actualStatus} {singleResponse.statusText}
                   </motion.span>
                   <span className="px-2 py-0.5 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border text-pm-light-text dark:text-pm-dark-text">
-                    Time: <strong className="text-pm-orange">{singleResponse.latencyMs}ms</strong>
+                    {t.timeLabel}: <strong className="text-pm-orange">{singleResponse.latencyMs}ms</strong>
                   </span>
                   <span className="px-2 py-0.5 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border text-pm-light-text dark:text-pm-dark-text">
-                    Size: <strong className="text-pm-light-text dark:text-pm-dark-text">{singleResponse.responseSize}</strong>
+                    {t.sizeLabel}: <strong className="text-pm-light-text dark:text-pm-dark-text">{singleResponse.responseSize}</strong>
                   </span>
                 </>
               ) : latestRun ? (
@@ -925,7 +927,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
                   className="px-2.5 py-1 rounded bg-pm-light-panel dark:bg-pm-dark-panel hover:bg-pm-orange/15 border border-pm-light-border dark:border-pm-dark-border hover:border-pm-orange/50 text-pm-light-text dark:text-pm-dark-text transition-colors flex items-center gap-1.5 font-sans text-xs font-semibold cursor-pointer"
                 >
                   <Download className="w-3 h-3 text-pm-orange" />
-                  <span>Export SLA Report</span>
+                  <span>{t.exportReportBtn}</span>
                   <ChevronDown className="w-3 h-3 opacity-60" />
                 </motion.button>
 
@@ -941,14 +943,14 @@ export const Workstation: React.FC<WorkstationProps> = ({
                       className="w-full px-3 py-1.5 text-left flex items-center gap-2 hover:bg-pm-light-panelHover dark:hover:bg-pm-dark-panelHover text-pm-light-text dark:text-pm-dark-text transition-colors cursor-pointer"
                     >
                       <FileCode className="w-3.5 h-3.5 text-pm-orange" />
-                      <span>Exportar JSON (.json)</span>
+                      <span>{t.exportJson}</span>
                     </button>
                     <button
                       onClick={() => handleExportReport('csv')}
                       className="w-full px-3 py-1.5 text-left flex items-center gap-2 hover:bg-pm-light-panelHover dark:hover:bg-pm-dark-panelHover text-pm-light-text dark:text-pm-dark-text transition-colors cursor-pointer"
                     >
                       <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-500" />
-                      <span>Exportar Planilha (.csv)</span>
+                      <span>{t.exportCsv}</span>
                     </button>
                   </motion.div>
                 )}
@@ -982,8 +984,8 @@ export const Workstation: React.FC<WorkstationProps> = ({
                   ) : !singleResponse ? (
                     <div className="py-14 text-center text-pm-light-textMuted dark:text-pm-dark-textMuted space-y-2">
                       <Send className="w-8 h-8 mx-auto opacity-30 text-pm-orange" />
-                      <p className="font-semibold text-pm-light-text dark:text-pm-dark-text">Nenhuma resposta individual recebida.</p>
-                      <p className="text-[11px]">Clique no botão "Send" (ou tecle Enter) na barra de endereço para disparar.</p>
+                      <p className="font-semibold text-pm-light-text dark:text-pm-dark-text">{t.noSingleResponseYet}</p>
+                      <p className="text-[11px]">{t.clickSendHint}</p>
                     </div>
                   ) : (
                     <>
@@ -1000,7 +1002,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
                               className="flex items-center gap-1 text-[11px] text-pm-orange hover:underline cursor-pointer font-bold px-2 py-0.5 rounded hover:bg-pm-orange/10 transition-colors"
                             >
                               {copied ? <CheckCheck className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                              <span>{copied ? 'Copiado!' : 'Copiar Payload'}</span>
+                              <span>{copied ? t.copied : t.copyPayload}</span>
                             </button>
                           </div>
                           <div className="flex-1 p-2 overflow-y-auto">
@@ -1088,9 +1090,9 @@ export const Workstation: React.FC<WorkstationProps> = ({
                           <table className="w-full text-left font-mono text-[11px]">
                             <thead className="bg-pm-light-panel dark:bg-pm-dark-panel border-b border-pm-light-border dark:border-pm-dark-border text-[10px] text-pm-light-textMuted dark:text-pm-dark-textMuted uppercase">
                               <tr>
-                                <th className="px-4 py-2">Header Key</th>
-                                <th className="px-4 py-2">Header Value</th>
-                                <th className="px-4 py-2 text-right">Ação</th>
+                                <th className="px-4 py-2">{t.headerKey}</th>
+                                <th className="px-4 py-2">{t.headerValue}</th>
+                                <th className="px-4 py-2 text-right">{t.headerAction}</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-pm-light-border dark:divide-pm-dark-border">
@@ -1147,8 +1149,8 @@ export const Workstation: React.FC<WorkstationProps> = ({
                       ) : !latestRun ? (
                         <div className="py-12 text-center text-pm-light-textMuted dark:text-slate-500 space-y-1">
                           <Terminal className="w-8 h-8 mx-auto opacity-30" />
-                          <p>Nenhuma bateria de coleção executada ainda.</p>
-                          <p className="text-[10px]">Clique em "Run Collection" no topo para disparar toda a suíte.</p>
+                          <p>{t.noCollectionRunYet}</p>
+                          <p className="text-[10px]">{t.clickRunCollectionHint}</p>
                         </div>
                       ) : (
                         <motion.div 

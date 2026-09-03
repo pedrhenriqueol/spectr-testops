@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { X, Sparkles, FolderPlus } from 'lucide-react';
+import { useLanguage } from '../context/LanguageContext';
 
 interface CreateSuiteModalProps {
   isOpen: boolean;
@@ -16,6 +17,7 @@ export const CreateSuiteModal: React.FC<CreateSuiteModalProps> = ({
   const [description, setDescription] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
   const [loading, setLoading] = useState(false);
+  const { t } = useLanguage();
 
   if (!isOpen) return null;
 
@@ -56,7 +58,7 @@ export const CreateSuiteModal: React.FC<CreateSuiteModalProps> = ({
           <div className="flex items-center gap-2">
             <FolderPlus className="w-4 h-4 text-pm-orange" />
             <h3 className="font-bold text-pm-light-text dark:text-pm-dark-text text-sm">
-              Criar Nova Coleção Postman
+              {t.createSuiteTitle}
             </h3>
           </div>
 
