@@ -9,7 +9,7 @@ import { CreateSuiteModal } from './components/CreateSuiteModal';
 import { CreateEndpointModal } from './components/CreateEndpointModal';
 import { ThemeProvider } from './context/ThemeContext';
 import { ToastProvider, useToast } from './context/ToastContext';
-import { AnimatePresence, motion } from 'framer-motion';
+import { motion } from 'framer-motion';
 
 function MainApp() {
   const { showToast } = useToast();
@@ -45,7 +45,7 @@ function MainApp() {
       setRunsHistory(runs);
       if (runs.length > 0 && !latestRun) {
         try {
-          const runDetail = await api.get(`/runs/${runs[0].id}`);
+          const runDetail = await api.get('/runs/' + runs[0].id);
           setLatestRun(runDetail.data.run);
         } catch {
           // ignore
@@ -69,17 +69,17 @@ function MainApp() {
         message: 'Disparando chamadas sequenciais e calculando latência p95/p99...'
       });
 
-      const res = await api.post(`/suites/${suiteId}/run`);
+      const res = await api.post('/suites/' + suiteId + '/run');
       const runId = res.data.runId;
       
-      const runDetail = await api.get(`/runs/${runId}`);
+      const runDetail = await api.get('/runs/' + runId);
       setLatestRun(runDetail.data.run);
       await loadData();
 
       showToast({
         type: runDetail.data.run.status === 'PASSED' ? 'success' : 'warn',
-        title: `Suíte Concluída: ${runDetail.data.run.status}`,
-        message: `${runDetail.data.run.passedTests}/${runDetail.data.run.totalTests} testes aprovados (${runDetail.data.run.successRate}%)`
+        title: 'Suíte Concluída: ' + runDetail.data.run.status,
+        message: runDetail.data.run.passedTests + '/' + runDetail.data.run.totalTests + ' testes aprovados (' + runDetail.data.run.successRate + '%)'
       });
     } catch (err: any) {
       console.error('Erro na execução da suíte:', err);
@@ -115,7 +115,7 @@ function MainApp() {
       showToast({
         type: 'success',
         title: 'Coleção Criada',
-        message: `Suíte "${data.name}" adicionada com sucesso.`
+        message: 'Suíte "' + data.name + '" adicionada com sucesso.'
       });
     } catch (err: any) {
       showToast({
@@ -129,12 +129,12 @@ function MainApp() {
   const handleCreateEndpoint = async (data: any) => {
     if (!selectedSuite) return;
     try {
-      await api.post(`/suites/${selectedSuite.id}/cases`, data);
+      await api.post('/suites/' + selectedSuite.id + '/cases', data);
       await loadData();
       showToast({
         type: 'success',
         title: 'Endpoint Adicionado',
-        message: `[${data.method}] ${data.path} salvo na coleção.`
+        message: '[' + data.method + '] ' + data.path + ' salvo na coleção.'
       });
     } catch (err: any) {
       showToast({
@@ -148,7 +148,7 @@ function MainApp() {
   const handleUpdateBaseUrl = async (newUrl: string) => {
     if (!selectedSuite) return;
     try {
-      await api.patch(`/suites/${selectedSuite.id}`, { baseUrl: newUrl });
+      await api.patch('/suites/' + selectedSuite.id, { baseUrl: newUrl });
       await loadData();
     } catch (err: any) {
       console.error(err);
@@ -172,72 +172,67 @@ function MainApp() {
         setSearchQuery={setSearchQuery}
       />
 
-      {/* 2. Main Workstation Area com Transições Fluidas Framer Motion */}
-      <div className="flex-1 flex overflow-hidden relative">
-        <AnimatePresence mode="wait">
-          {activeView === 'workstation' && (
-            <motion.div
-              key="workstation"
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.18, ease: 'easeOut' }}
-              className="flex-1 flex overflow-hidden"
-            >
-              <Workstation
-                suites={suites}
-                selectedSuite={selectedSuite}
-                onSelectSuite={setSelectedSuite}
-                onRunSuite={handleRunSuite}
-                latestRun={latestRun}
-                isExecuting={isExecuting}
-                onOpenCreateModal={() => setIsCreateModalOpen(true)}
-                onOpenCreateEndpointModal={() => setIsCreateEndpointModalOpen(true)}
-                onUpdateBaseUrl={handleUpdateBaseUrl}
-                searchQuery={searchQuery}
-                setSearchQuery={setSearchQuery}
-                environment={environment}
-              />
-            </motion.div>
-          )}
+      {/* 2. Main Workstation Area com Renderização Direta e Fluid Motion */}
+      <div className="flex-1 flex overflow-hidden relative w-full h-full">
+        {activeView === 'workstation' && (
+          <motion.div
+            key="workstation"
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.15, ease: 'easeOut' }}
+            className="w-full h-full flex overflow-hidden"
+          >
+            <Workstation
+              suites={suites}
+              selectedSuite={selectedSuite}
+              onSelectSuite={setSelectedSuite}
+              onRunSuite={handleRunSuite}
+              latestRun={latestRun}
+              isExecuting={isExecuting}
+              onOpenCreateModal={() => setIsCreateModalOpen(true)}
+              onOpenCreateEndpointModal={() => setIsCreateEndpointModalOpen(true)}
+              onUpdateBaseUrl={handleUpdateBaseUrl}
+              searchQuery={searchQuery}
+              setSearchQuery={setSearchQuery}
+              environment={environment}
+            />
+          </motion.div>
+        )}
 
-          {activeView === 'chaos' && (
-            <motion.div
-              key="chaos"
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.18, ease: 'easeOut' }}
-              className="flex-1 flex overflow-hidden"
-            >
-              <ChaosLab />
-            </motion.div>
-          )}
+        {activeView === 'chaos' && (
+          <motion.div
+            key="chaos"
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.15, ease: 'easeOut' }}
+            className="w-full h-full flex flex-col overflow-hidden"
+          >
+            <ChaosLab />
+          </motion.div>
+        )}
 
-          {activeView === 'history' && (
-            <motion.div
-              key="history"
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.18, ease: 'easeOut' }}
-              className="flex-1 flex overflow-hidden"
-            >
-              <AuditLedger
-                runs={runsHistory}
-                onSelectRun={async (r) => {
-                  try {
-                    const runDetail = await api.get(`/runs/${r.id}`);
-                    setLatestRun(runDetail.data.run);
-                    setActiveView('workstation');
-                  } catch {
-                    setActiveView('workstation');
-                  }
-                }}
-              />
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {activeView === 'history' && (
+          <motion.div
+            key="history"
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.15, ease: 'easeOut' }}
+            className="w-full h-full flex flex-col overflow-hidden"
+          >
+            <AuditLedger
+              runs={runsHistory}
+              onSelectRun={async (r) => {
+                try {
+                  const runDetail = await api.get('/runs/' + r.id);
+                  setLatestRun(runDetail.data.run);
+                  setActiveView('workstation');
+                } catch {
+                  setActiveView('workstation');
+                }
+              }}
+            />
+          </motion.div>
+        )}
       </div>
 
       {/* Modais */}
