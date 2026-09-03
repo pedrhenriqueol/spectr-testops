@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 
 export type Language = 'pt' | 'en';
 
-interface Translations {
+export interface Translations {
   // TopNav
   workspaceTitle: string;
   collectionsTab: string;
@@ -17,6 +17,9 @@ interface Translations {
   envLocal: string;
   themeLight: string;
   themeDark: string;
+  langLabel: string;
+  langPt: string;
+  langEn: string;
 
   // Workstation - Sidebar
   collectionsHeader: string;
@@ -135,8 +138,8 @@ export const translations: Record<Language, Translations> = {
   pt: {
     workspaceTitle: 'Enterprise QA Workspace',
     collectionsTab: 'Coleções & Requisições',
-    chaosTab: 'Laboratório de Caos',
-    auditTab: 'Livro de Auditoria',
+    chaosTab: 'Engenharia de Chaos',
+    auditTab: 'Trilha de Auditoria',
     searchPlaceholder: 'Buscar endpoints, rotas (Ctrl+K)...',
     runCollection: 'Executar Coleção',
     running: 'Executando...',
@@ -146,6 +149,9 @@ export const translations: Record<Language, Translations> = {
     envLocal: 'Localhost (Porta 3334)',
     themeLight: 'Claro',
     themeDark: 'Escuro',
+    langLabel: 'PT-BR',
+    langPt: 'Português (Brasil)',
+    langEn: 'English (US)',
 
     collectionsHeader: 'Coleções',
     requestBtn: 'Requisição',
@@ -155,30 +161,30 @@ export const translations: Record<Language, Translations> = {
     selectCollectionPrompt: 'Selecione uma coleção.',
     endpointsReady: 'endpoints prontos',
 
-    sendBtn: 'Enviar',
-    sendingBtn: 'Enviando...',
+    sendBtn: 'Send',
+    sendingBtn: 'Sending...',
     noRequestSelected: 'Nenhuma requisição selecionada',
     expectedStatusLabel: 'Status Esperado',
     slaTargetLabel: 'Alvo SLA',
     activeEnvLabel: 'AMBIENTE',
-    enterToSendHint: 'Enter ↵ para Enviar',
+    enterToSendHint: 'Enter ↵ to Send',
     clickToToggleUrl: 'Clique para alternar entre {{BASE_URL}} e URL resolvida',
 
-    tabAssertions: 'Asserções & SLA',
-    tabHeaders: 'Cabeçalhos',
-    tabBody: 'Corpo (JSON)',
-    tabSchema: 'Esquema de Contrato',
+    tabAssertions: 'Assertions & SLA',
+    tabHeaders: 'Headers',
+    tabBody: 'Body (JSON)',
+    tabSchema: 'Contract Schema',
 
-    statusCodeCheck: 'Verificação de Código de Status',
-    latencySlaCheck: 'Limite de Latência e SLA',
+    statusCodeCheck: 'Status Code Check',
+    latencySlaCheck: 'Response Time SLA Threshold',
     noBodyConfigured: 'Nenhum payload JSON configurado para este endpoint.',
     autoContractValidation: 'Validação automática de contrato ativa (status 200 OK).',
 
-    modeSingleResponse: '⚡ Resposta Individual',
+    modeSingleResponse: '⚡ Resposta Única',
     modeCollectionRunner: '📋 Executor de Coleção',
-    subtabBody: 'Corpo (JSON)',
-    subtabTestResults: 'Resultados dos Testes',
-    subtabHeaders: 'Cabeçalhos',
+    subtabBody: 'Body (JSON)',
+    subtabTestResults: 'Test Results',
+    subtabHeaders: 'Headers',
     subtabCliStream: 'Fluxo CLI',
     subtabBreakdown: 'Detalhamento',
     exportReportBtn: 'Exportar Relatório SLA',
@@ -186,40 +192,40 @@ export const translations: Record<Language, Translations> = {
     exportCsv: 'Exportar Planilha (.csv)',
     copyPayload: 'Copiar Payload',
     copied: 'Copiado!',
-    noSingleResponseYet: 'Nenhuma resposta individual recebida.',
-    clickSendHint: 'Clique no botão "Enviar" (ou tecle Enter) na barra de endereço para disparar.',
+    noSingleResponseYet: 'Nenhuma resposta recebida ainda.',
+    clickSendHint: 'Clique no botão "Send" (ou tecle Enter) na barra de endereço para disparar.',
     headerKey: 'Chave do Cabeçalho',
     headerValue: 'Valor do Cabeçalho',
     headerAction: 'Ação',
     statusLabel: 'Status',
     timeLabel: 'Tempo',
     sizeLabel: 'Tamanho',
-    noCollectionRunYet: 'Nenhuma bateria de coleção executada ainda.',
+    noCollectionRunYet: 'Nenhuma coleção executada ainda.',
     clickRunCollectionHint: 'Clique em "Executar Coleção" no topo para disparar toda a suíte.',
-    resultPassed: 'APROVADOS',
+    resultPassed: 'PASSED',
     successRate: 'Taxa de Sucesso',
     p95Latency: 'Latência p95',
     totalDuration: 'Duração Total',
 
-    chaosTitle: 'Laboratório de Engenharia do Caos',
-    chaosSubtitle: 'Simule falhas de infraestrutura, alta latência de rede e intermitências controladas contra APIs e microsserviços.',
-    chaosEngineActive: 'Motor de Caos v10.4 Ativo',
+    chaosTitle: 'Postman Chaos Engineering Lab',
+    chaosSubtitle: 'Injeção de estresse em tempo de execução: latência induzida, jitter de rede e erros 5xx controlados contra APIs e gateways.',
+    chaosEngineActive: 'Chaos Engine v10.4 Ativo',
     latencyInjectionTitle: 'Injeção de Latência de Rede',
     injectLatencyBtn: 'Injetar Atraso de Rede',
     faultOverrideTitle: 'Substituição de Código de Falha',
     triggerFaultBtn: 'Disparar Falha de Infraestrutura',
     stochasticTitle: 'Simulação Estocástica Instável',
-    stochasticSubtitle: 'Simula oscilações aleatórias na rota com taxa de descarte de 50%.',
+    stochasticSubtitle: 'Simula oscilações randômicas de rota com taxa de descarte de pacotes de 50%.',
     testFlakyBtn: 'Testar Conexão Instável',
-    chaosConsoleTitle: 'Console de Resposta do Caos',
-    noChaosFiredYet: 'Nenhum teste de caos disparado. Escolha um dos controles à esquerda para testar.',
-    injectingChaosWait: 'Injetando caos e aguardando resposta da camada de rede...',
+    chaosConsoleTitle: 'Chaos Response Console',
+    noChaosFiredYet: 'Nenhum teste de chaos disparado. Escolha um dos controles à esquerda para injetar estresse.',
+    injectingChaosWait: 'Injetando falha e calculando impacto no percentil p95...',
 
-    auditTitle: 'Livro de Auditoria & Histórico de Execuções',
-    auditSubtitle: 'Registro histórico imutável das baterias de testes com telemetria p95, taxas de sucesso e conformidade SLA.',
+    auditTitle: 'Trilha de Auditoria & Histórico de Execuções',
+    auditSubtitle: 'Registro histórico imutável das baterias de testes com telemetria p95/p99, taxas de sucesso e conformidade SLA.',
     totalExecutions: 'Total Execuções',
-    auditVerifiedBadge: 'Livro de Auditoria Verificado',
-    colRunId: 'ID da Execução',
+    auditVerifiedBadge: 'Trilha de Auditoria Verificada',
+    colRunId: 'Run ID',
     colStatus: 'Status',
     colTargetSuite: 'Suíte Alvo',
     colPassTotal: 'Pass/Total',
@@ -227,12 +233,12 @@ export const translations: Record<Language, Translations> = {
     colP95: 'p95 Latência',
     colDuration: 'Duração',
     colDateTime: 'Data / Hora',
-    noExecutionsFound: 'Nenhum registro de execução encontrado.',
+    noExecutionsFound: 'Nenhum registro de auditoria encontrado.',
 
     createSuiteTitle: 'Criar Nova Coleção',
     createSuiteSubtitle: 'Agrupe endpoints de testes e defina a Base URL do ambiente de destino.',
     suiteNameLabel: 'Nome da Coleção',
-    suiteNamePlaceholder: 'Ex: PayStream Core Banking',
+    suiteNamePlaceholder: 'Ex: PayStream Core Banking Suite',
     suiteDescLabel: 'Descrição Técnica (Opcional)',
     suiteDescPlaceholder: 'Ex: Testes de concorrência, split de pagamento e idempotência.',
     suiteBaseUrlLabel: 'Base URL Alvo',
@@ -264,6 +270,9 @@ export const translations: Record<Language, Translations> = {
     envLocal: 'Localhost (Port 3334)',
     themeLight: 'Light',
     themeDark: 'Dark',
+    langLabel: 'EN-US',
+    langPt: 'Portuguese (Brazil)',
+    langEn: 'English (US)',
 
     collectionsHeader: 'Collections',
     requestBtn: 'Request',
@@ -320,7 +329,7 @@ export const translations: Record<Language, Translations> = {
     totalDuration: 'Total Duration',
 
     chaosTitle: 'Postman Chaos Engineering Lab',
-    chaosSubtitle: 'Simulate infrastructure failures, network latency spikes, and controlled intermittency against APIs and microservices.',
+    chaosSubtitle: 'Runtime stress injection: induced latency, network jitter, and controlled 5xx errors against APIs and gateways.',
     chaosEngineActive: 'Chaos Engine v10.4 Active',
     latencyInjectionTitle: 'Network Latency Injection',
     injectLatencyBtn: 'Inject Network Latency',
@@ -330,11 +339,11 @@ export const translations: Record<Language, Translations> = {
     stochasticSubtitle: 'Simulate random packet drops with 50% discard rate.',
     testFlakyBtn: 'Test Flaky Connection',
     chaosConsoleTitle: 'Chaos Response Console',
-    noChaosFiredYet: 'No chaos test fired yet. Choose one of the controls on the left to test.',
-    injectingChaosWait: 'Injecting chaos and awaiting network response...',
+    noChaosFiredYet: 'No chaos test fired yet. Choose one of the controls on the left to inject stress.',
+    injectingChaosWait: 'Injecting fault and evaluating impact on p95 percentile...',
 
     auditTitle: 'Audit Ledger & Test Run History',
-    auditSubtitle: 'Immutable historical ledger of test runs with p95 telemetry, success rates, and SLA compliance metrics.',
+    auditSubtitle: 'Immutable historical ledger of test runs with p95/p99 telemetry, success rates, and SLA compliance metrics.',
     totalExecutions: 'Total Executions',
     auditVerifiedBadge: 'Audit Ledger Verified',
     colRunId: 'Run ID',
@@ -350,7 +359,7 @@ export const translations: Record<Language, Translations> = {
     createSuiteTitle: 'Create New Collection',
     createSuiteSubtitle: 'Group API test endpoints and configure the target environment Base URL.',
     suiteNameLabel: 'Collection Name',
-    suiteNamePlaceholder: 'e.g., PayStream Core Banking',
+    suiteNamePlaceholder: 'e.g., PayStream Core Banking Suite',
     suiteDescLabel: 'Technical Description (Optional)',
     suiteDescPlaceholder: 'e.g., Concurrency tests, payment splits, and idempotency.',
     suiteBaseUrlLabel: 'Target Base URL',
@@ -383,7 +392,7 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [language, setLanguageState] = useState<Language>(() => {
     const saved = localStorage.getItem('spectr_lang') as Language;
     if (saved === 'pt' || saved === 'en') return saved;
-    return 'pt'; // Default em Português conforme solicitado
+    return 'pt';
   });
 
   useEffect(() => {

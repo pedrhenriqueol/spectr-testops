@@ -35,21 +35,40 @@ export const ChaosLab: React.FC = () => {
       } catch {
         await new Promise(r => setTimeout(r, Math.min(delay, 1200)));
         resData = {
-          simulated: true,
-          type: 'LATENCY_DELAY',
+          protocol: 'SPECTR_CHAOS_PROTOCOL_V10.4',
+          simulationType: 'NETWORK_LATENCY_INJECTION',
           delayInjectedMs: delay,
           timestamp: new Date().toISOString(),
-          message: 'Resposta atrasada propositalmente em ' + delay + 'ms para testes de resiliência e timeout SLA.'
+          slaImpactAnalysis: {
+            slaTargetLimitMs: 250,
+            measuredLatencyMs: delay,
+            slaStatus: delay <= 250 ? 'CONFORMING' : 'VIOLATION',
+            projectedP95Ms: Math.round(delay * 1.15),
+            projectedP99Ms: Math.round(delay * 1.35),
+            riskLevel: delay > 1200 ? 'CRITICAL' : delay > 600 ? 'HIGH' : delay > 250 ? 'MODERATE' : 'LOW',
+            recommendation: delay > 250 ? 'Ativar Circuit Breaker e cacheamento de borda em gateways distribuídos.' : 'Latência dentro dos limiares de conformidade SLA.'
+          }
         };
       }
 
       const elapsed = Date.now() - start;
       setLatency(elapsed);
+      if (!resData.slaImpactAnalysis) {
+        resData.slaImpactAnalysis = {
+          slaTargetLimitMs: 250,
+          measuredLatencyMs: elapsed,
+          slaStatus: elapsed <= 250 ? 'CONFORMING' : 'VIOLATION',
+          projectedP95Ms: Math.round(elapsed * 1.15),
+          projectedP99Ms: Math.round(elapsed * 1.35),
+          riskLevel: elapsed > 1200 ? 'CRITICAL' : elapsed > 600 ? 'HIGH' : elapsed > 250 ? 'MODERATE' : 'LOW',
+          recommendation: elapsed > 250 ? 'Ativar Circuit Breaker e fallbacks resilientes.' : 'Latência em conformidade.'
+        };
+      }
       setOutput(resData);
       showToast({
-        type: 'warn',
-        title: 'Latência Injetada: ' + elapsed + 'ms',
-        message: 'Atraso propagado com sucesso na malha de testes.'
+        type: elapsed > 250 ? 'warn' : 'success',
+        title: 'Latência Medida: ' + elapsed + 'ms (p95: ' + resData.slaImpactAnalysis.projectedP95Ms + 'ms)',
+        message: 'Impacto no SLA: ' + resData.slaImpactAnalysis.slaStatus
       });
     } catch (err: any) {
       setLatency(Date.now() - start);
@@ -75,11 +94,16 @@ export const ChaosLab: React.FC = () => {
         resData = res.data;
       } catch (err: any) {
         resData = err.response?.data || {
-          simulated: true,
-          type: 'INJECTED_ERROR',
-          statusCode: errorCode,
+          protocol: 'SPECTR_CHAOS_PROTOCOL_V10.4',
+          simulationType: 'FAULT_STATUS_CODE_OVERRIDE',
+          injectedStatus: errorCode,
           error: errorCode === 503 ? 'Service Unavailable' : errorCode === 429 ? 'Too Many Requests' : 'Internal Server Error',
-          message: 'Falha simulada injetada pelo motor de Chaos Engineering do Spectr.'
+          slaImpactAnalysis: {
+            availabilityImpact: '-100% no endpoint alvo durante a injeção',
+            circuitBreakerTriggered: errorCode === 503 || errorCode === 500,
+            rateLimitingDefense: errorCode === 429 ? 'Ativo (Token Bucket)' : 'N/A',
+            recommendation: 'Verificar retentativas exponenciais com jitter e isolamento em DLQ.'
+          }
         };
       }
 
@@ -88,7 +112,7 @@ export const ChaosLab: React.FC = () => {
       showToast({
         type: 'error',
         title: 'Falha HTTP ' + errorCode + ' Injetada',
-        message: resData.error || 'Indisponibilidade capturada pelo gateway.'
+        message: resData.error || 'Indisponibilidade simulada capturada.'
       });
     } catch (err: any) {
       setLatency(Date.now() - start);

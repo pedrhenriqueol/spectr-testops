@@ -431,7 +431,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-pm-light-text dark:text-pm-dark-text uppercase tracking-wider font-mono flex items-center gap-1.5">
               <Folder className="w-3.5 h-3.5 text-pm-orange" />
-              Collections
+              {t.collectionsHeader}
             </span>
             <div className="flex items-center gap-1">
               <button
@@ -1039,7 +1039,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
                           <motion.div 
                             initial={{ opacity: 0, x: -6 }}
                             animate={{ opacity: 1, x: 0 }}
-                            transition={{ delay: 0.05 }}
+                            transition={{ duration: 0.15, delay: 0.04 }}
                             className="p-3 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border flex items-center justify-between"
                           >
                             <div className="flex items-center gap-2">
@@ -1158,7 +1158,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
                           animate="visible"
                           variants={{
                             hidden: { opacity: 0 },
-                            visible: { opacity: 1, transition: { staggerChildren: 0.05 } }
+                            visible: { opacity: 1, transition: { staggerChildren: 0.04 } }
                           }}
                           className="space-y-1.5 leading-relaxed"
                         >
