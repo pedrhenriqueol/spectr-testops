@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { Sliders, Zap, AlertTriangle, Clock, RefreshCw, Terminal, Activity, Play, CheckCircle2 } from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import axios from 'axios';
+import { Sliders, Zap, AlertTriangle, Clock, RefreshCw, Terminal, Activity, Play } from 'lucide-react';
 import { api } from '../api/client';
 import { useToast } from '../context/ToastContext';
 import { useLanguage } from '../context/LanguageContext';
@@ -7,167 +8,86 @@ import { motion } from 'framer-motion';
 
 export const ChaosLab: React.FC = () => {
   const { showToast } = useToast();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const [delay, setDelay] = useState(350);
   const [errorCode, setErrorCode] = useState(503);
   const [loading, setLoading] = useState(false);
-  const [output, setOutput] = useState<any>({
-    protocol: 'SPECTR CHAOS ENGINE v10.4',
-    status: 'IDLE',
-    message: 'Pronto para injeção de latência, códigos de falha e instabilidade na malha de microsserviços.'
-  });
+  const [output, setOutput] = useState<unknown>(null);
   const [latency, setLatency] = useState<number | null>(null);
+  const requestInProgress = useRef(false);
+  const text = (pt: string, en: string) => language === 'pt' ? pt : en;
 
-  const handleTestDelay = async () => {
-    const start = Date.now();
+  const reportFailure = (error: unknown) => {
+    const message = axios.isAxiosError(error)
+      ? error.response?.data?.message || error.response?.data?.error || error.message
+      : error instanceof Error ? error.message : text('Erro inesperado.', 'Unexpected error.');
+    setLatency(null);
+    setOutput({
+      status: 'REQUEST_FAILED',
+      message,
+      ...(axios.isAxiosError(error) && error.response ? { httpStatus: error.response.status, response: error.response.data } : {})
+    });
+    showToast({
+      type: 'error',
+      title: text('Falha no teste de Chaos', 'Chaos test failed'),
+      message
+    });
+  };
+
+  const runTest = async (path: string, expectedType: string[], expectedStatus?: number) => {
+    if (requestInProgress.current) return;
+    requestInProgress.current = true;
+    setLoading(true);
+    setLatency(null);
+    const start = performance.now();
     try {
-      setLoading(true);
-      showToast({
-        type: 'info',
-        title: 'Injetando Latência',
-        message: 'Atrasando resposta artificialmente em ' + delay + 'ms...'
-      });
-
-      let resData: any = null;
-      try {
-        const res = await api.get('/chaos/simulate-delay?delay=' + delay);
-        resData = res.data;
-      } catch {
-        await new Promise(r => setTimeout(r, Math.min(delay, 1200)));
-        resData = {
-          protocol: 'SPECTR_CHAOS_PROTOCOL_V10.4',
-          simulationType: 'NETWORK_LATENCY_INJECTION',
-          delayInjectedMs: delay,
-          timestamp: new Date().toISOString(),
-          slaImpactAnalysis: {
-            slaTargetLimitMs: 250,
-            measuredLatencyMs: delay,
-            slaStatus: delay <= 250 ? 'CONFORMING' : 'VIOLATION',
-            projectedP95Ms: Math.round(delay * 1.15),
-            projectedP99Ms: Math.round(delay * 1.35),
-            riskLevel: delay > 1200 ? 'CRITICAL' : delay > 600 ? 'HIGH' : delay > 250 ? 'MODERATE' : 'LOW',
-            recommendation: delay > 250 ? 'Ativar Circuit Breaker e cacheamento de borda em gateways distribuídos.' : 'Latência dentro dos limiares de conformidade SLA.'
-          }
-        };
+      const response = await api.get(path, { validateStatus: () => true });
+      const data = response.data;
+      const expectedResponse = data?.simulated === true && expectedType.includes(data?.type)
+        && (expectedStatus === undefined
+          ? (data.type === 'FLAKY_SUCCESS' && response.status === 200) || (data.type === 'FLAKY_FAILURE' && response.status === 500)
+          : response.status === expectedStatus);
+      if (!expectedResponse) {
+        setOutput({ status: 'UNEXPECTED_RESPONSE', httpStatus: response.status, response: data });
+        showToast({
+          type: 'error',
+          title: text('Resposta inesperada do motor de Chaos', 'Unexpected Chaos engine response'),
+          message: `HTTP ${response.status}`
+        });
+        return;
       }
-
-      const elapsed = Date.now() - start;
+      const elapsed = Math.round(performance.now() - start);
       setLatency(elapsed);
-      if (!resData.slaImpactAnalysis) {
-        resData.slaImpactAnalysis = {
-          slaTargetLimitMs: 250,
-          measuredLatencyMs: elapsed,
-          slaStatus: elapsed <= 250 ? 'CONFORMING' : 'VIOLATION',
-          projectedP95Ms: Math.round(elapsed * 1.15),
-          projectedP99Ms: Math.round(elapsed * 1.35),
-          riskLevel: elapsed > 1200 ? 'CRITICAL' : elapsed > 600 ? 'HIGH' : elapsed > 250 ? 'MODERATE' : 'LOW',
-          recommendation: elapsed > 250 ? 'Ativar Circuit Breaker e fallbacks resilientes.' : 'Latência em conformidade.'
-        };
-      }
-      setOutput(resData);
+      setOutput({ ...data, httpStatus: response.status, measuredLatencyMs: elapsed });
       showToast({
-        type: elapsed > 250 ? 'warn' : 'success',
-        title: 'Latência Medida: ' + elapsed + 'ms (p95: ' + resData.slaImpactAnalysis.projectedP95Ms + 'ms)',
-        message: 'Impacto no SLA: ' + resData.slaImpactAnalysis.slaStatus
+        type: response.status >= 400 || (data.type === 'LATENCY_DELAY' && elapsed > 250) ? 'warn' : 'success',
+        title: data.type === 'LATENCY_DELAY'
+          ? text(`Latência medida: ${elapsed}ms`, `Measured latency: ${elapsed}ms`)
+          : text(`Resposta de Chaos recebida: HTTP ${response.status}`, `Chaos response received: HTTP ${response.status}`),
+        message: data.message
       });
-    } catch (err: any) {
-      setLatency(Date.now() - start);
-      setOutput(err.response?.data || err.message);
+    } catch (error: unknown) {
+      reportFailure(error);
     } finally {
+      requestInProgress.current = false;
       setLoading(false);
     }
   };
 
-  const handleTestError = async () => {
-    const start = Date.now();
-    try {
-      setLoading(true);
-      showToast({
-        type: 'warn',
-        title: 'Injetando Falha HTTP ' + errorCode,
-        message: 'Simulando colapso de microsserviço...'
-      });
-
-      let resData: any = null;
-      try {
-        const res = await api.get('/chaos/simulate-error?code=' + errorCode);
-        resData = res.data;
-      } catch (err: any) {
-        resData = err.response?.data || {
-          protocol: 'SPECTR_CHAOS_PROTOCOL_V10.4',
-          simulationType: 'FAULT_STATUS_CODE_OVERRIDE',
-          injectedStatus: errorCode,
-          error: errorCode === 503 ? 'Service Unavailable' : errorCode === 429 ? 'Too Many Requests' : 'Internal Server Error',
-          slaImpactAnalysis: {
-            availabilityImpact: '-100% no endpoint alvo durante a injeção',
-            circuitBreakerTriggered: errorCode === 503 || errorCode === 500,
-            rateLimitingDefense: errorCode === 429 ? 'Ativo (Token Bucket)' : 'N/A',
-            recommendation: 'Verificar retentativas exponenciais com jitter e isolamento em DLQ.'
-          }
-        };
-      }
-
-      setLatency(Date.now() - start);
-      setOutput(resData);
-      showToast({
-        type: 'error',
-        title: 'Falha HTTP ' + errorCode + ' Injetada',
-        message: resData.error || 'Indisponibilidade simulada capturada.'
-      });
-    } catch (err: any) {
-      setLatency(Date.now() - start);
-      setOutput(err.response?.data || { error: 'Falha simulada capturada' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleTestFlaky = async () => {
-    const start = Date.now();
-    try {
-      setLoading(true);
-      showToast({
-        type: 'info',
-        title: 'Disparando Simulação Estocástica',
-        message: 'Testando oscilações randômicas de 50% de descarte...'
-      });
-
-      let resData: any = null;
-      try {
-        const res = await api.get('/chaos/simulate-flaky');
-        resData = res.data;
-      } catch (err: any) {
-        const isSuccess = Math.random() > 0.5;
-        resData = isSuccess
-          ? { simulated: true, type: 'FLAKY_SUCCESS', statusCode: 200, message: 'Requisição processada com sucesso na malha instável.' }
-          : { simulated: true, type: 'FLAKY_FAILURE', statusCode: 500, message: 'Falha intermitente simulada (500 Internal Error).' };
-      }
-
-      setLatency(Date.now() - start);
-      setOutput(resData);
-      showToast({
-        type: resData.type === 'FLAKY_SUCCESS' ? 'success' : 'warn',
-        title: resData.type === 'FLAKY_SUCCESS' ? 'Flaky Test: Sucesso (200 OK)' : 'Flaky Test: Falha Intermitente (500)',
-        message: resData.message
-      });
-    } catch (err: any) {
-      setLatency(Date.now() - start);
-      setOutput(err.response?.data || { error: 'Falha de intermitência simulada' });
-    } finally {
-      setLoading(false);
-    }
-  };
+  const handleTestDelay = () => runTest('/chaos/simulate-delay?delay=' + delay, ['LATENCY_DELAY'], 200);
+  const handleTestError = () => runTest('/chaos/simulate-error?code=' + errorCode, ['INJECTED_ERROR'], errorCode);
+  const handleTestFlaky = () => runTest('/chaos/simulate-flaky', ['FLAKY_SUCCESS', 'FLAKY_FAILURE']);
 
   return (
-    <div className="w-full h-full overflow-y-auto p-6 bg-pm-light-bg dark:bg-pm-dark-bg transition-colors duration-200">
+    <div className="w-full h-full overflow-y-auto p-3 sm:p-6 bg-pm-light-bg dark:bg-pm-dark-bg transition-colors duration-200">
       <div className="max-w-5xl mx-auto space-y-6">
         
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-bold text-pm-light-text dark:text-pm-dark-text flex items-center gap-2">
               <Sliders className="w-5 h-5 text-pm-orange" />
-              Postman Chaos Engineering Lab
+              {t.chaosTitle}
             </h2>
             <p className="text-xs text-pm-light-textMuted dark:text-pm-dark-textMuted mt-1">
               {t.chaosSubtitle}
@@ -175,7 +95,7 @@ export const ChaosLab: React.FC = () => {
           </div>
           <span className="px-2.5 py-1 rounded bg-pm-orange/10 border border-pm-orange/30 text-pm-orange font-mono text-[11px] font-semibold flex items-center gap-1.5">
             <Activity className="w-3.5 h-3.5" />
-            {t.chaosEngineActive}
+            {text('Simulador de Chaos', 'Chaos simulator')}
           </span>
         </div>
 
@@ -192,7 +112,7 @@ export const ChaosLab: React.FC = () => {
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-pm-light-text dark:text-pm-dark-text flex items-center gap-1.5">
                   <Clock className="w-4 h-4 text-pm-orange" />
-                  Network Latency Injection
+                  {t.latencyInjectionTitle}
                 </span>
                 <span className="text-xs font-mono font-bold text-pm-orange px-2 py-0.5 rounded bg-pm-orange/10 border border-pm-orange/30">
                   {delay}ms
@@ -201,6 +121,7 @@ export const ChaosLab: React.FC = () => {
 
               <input
                 type="range"
+                aria-label={t.latencyInjectionTitle}
                 min="50"
                 max="3000"
                 step="50"
@@ -243,7 +164,7 @@ export const ChaosLab: React.FC = () => {
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-pm-light-text dark:text-pm-dark-text flex items-center gap-1.5">
                   <AlertTriangle className="w-4 h-4 text-rose-500" />
-                  Fault Status Code Override
+                  {t.faultOverrideTitle}
                 </span>
                 <span className="text-xs font-mono font-bold text-rose-500 px-2 py-0.5 rounded bg-rose-500/10 border border-rose-500/30">
                   HTTP {errorCode}
@@ -287,7 +208,7 @@ export const ChaosLab: React.FC = () => {
             >
               <span className="text-xs font-bold text-pm-light-text dark:text-pm-dark-text flex items-center gap-1.5">
                 <RefreshCw className="w-4 h-4 text-amber-500" />
-                Stochastic Flaky Simulation
+                {t.stochasticTitle}
               </span>
               <p className="text-[11px] text-pm-light-textMuted dark:text-pm-dark-textMuted">
                 {t.stochasticSubtitle}
@@ -306,27 +227,27 @@ export const ChaosLab: React.FC = () => {
 
 
           {/* Terminal de Saída de Injeção */}
-          <div className="rounded-lg bg-pm-light-surface dark:bg-pm-dark-surface border border-pm-light-border dark:border-pm-dark-border p-4 flex flex-col font-mono text-xs shadow-sm min-h-[420px]">
+          <div className="rounded-lg bg-pm-light-surface dark:bg-pm-dark-surface border border-pm-light-border dark:border-pm-dark-border p-4 min-w-0 flex flex-col font-mono text-xs shadow-sm min-h-[420px]">
             <div className="flex items-center justify-between pb-2 border-b border-pm-light-border dark:border-pm-dark-border text-pm-light-textMuted dark:text-pm-dark-textMuted text-[11px]">
               <span className="flex items-center gap-1.5 font-bold text-pm-light-text dark:text-pm-dark-text">
                 <Terminal className="w-3.5 h-3.5 text-pm-orange" />
-                Chaos Response Console
+                {t.chaosConsoleTitle}
               </span>
               {latency !== null && (
                 <span className="text-pm-orange font-bold px-2 py-0.5 rounded bg-pm-orange/10 border border-pm-orange/30">
-                  Latency: {latency}ms
+                  {text('Latência', 'Latency')}: {latency}ms
                 </span>
               )}
             </div>
 
-            <div className="flex-1 mt-3 p-3 rounded bg-pm-light-panel dark:bg-[#151515] border border-pm-light-border dark:border-pm-dark-border overflow-y-auto text-[11px] text-pm-light-text dark:text-slate-300">
+            <div aria-live="polite" aria-busy={loading} className="flex-1 min-w-0 mt-3 p-3 rounded bg-pm-light-panel dark:bg-[#151515] border border-pm-light-border dark:border-pm-dark-border overflow-y-auto text-[11px] text-pm-light-text dark:text-slate-300">
               {loading ? (
                 <div className="py-12 text-center space-y-2">
                   <div className="inline-block w-4 h-4 rounded-full border-2 border-pm-orange border-t-transparent animate-spin" />
-                  <p className="text-pm-orange font-bold">{t.injectingChaosWait}</p>
+                  <p className="text-pm-orange font-bold">{text('Aguardando resposta do motor de Chaos...', 'Waiting for the Chaos engine response...')}</p>
                 </div>
               ) : output ? (
-                <pre className="overflow-x-auto whitespace-pre-wrap">
+                <pre className="overflow-x-auto whitespace-pre-wrap break-words select-text">
                   {JSON.stringify(output, null, 2)}
                 </pre>
               ) : (

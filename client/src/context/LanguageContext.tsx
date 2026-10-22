@@ -144,9 +144,9 @@ export const translations: Record<Language, Translations> = {
     runCollection: 'Executar Coleção',
     running: 'Executando...',
     paystreamDemo: 'Demo PayStream',
-    envProduction: 'Produção (Render Cloud)',
+    envProduction: 'URL da coleção',
     envStaging: 'Cluster de Staging',
-    envLocal: 'Localhost (Porta 3334)',
+    envLocal: 'API do Spectr',
     themeLight: 'Claro',
     themeDark: 'Escuro',
     langLabel: 'PT-BR',
@@ -178,7 +178,7 @@ export const translations: Record<Language, Translations> = {
     statusCodeCheck: 'Status Code Check',
     latencySlaCheck: 'Response Time SLA Threshold',
     noBodyConfigured: 'Nenhum payload JSON configurado para este endpoint.',
-    autoContractValidation: 'Validação automática de contrato ativa (status 200 OK).',
+    autoContractValidation: 'Nenhum schema configurado. Status e SLA serão verificados.',
 
     modeSingleResponse: '⚡ Resposta Única',
     modeCollectionRunner: '📋 Executor de Coleção',
@@ -265,9 +265,9 @@ export const translations: Record<Language, Translations> = {
     runCollection: 'Run Collection',
     running: 'Running...',
     paystreamDemo: 'PayStream Demo',
-    envProduction: 'Production (Render Cloud)',
+    envProduction: 'Collection URL',
     envStaging: 'Staging Cluster',
-    envLocal: 'Localhost (Port 3334)',
+    envLocal: 'Spectr API',
     themeLight: 'Light',
     themeDark: 'Dark',
     langLabel: 'EN-US',
@@ -299,7 +299,7 @@ export const translations: Record<Language, Translations> = {
     statusCodeCheck: 'Status Code Check',
     latencySlaCheck: 'Response Time SLA Threshold',
     noBodyConfigured: 'No JSON payload configured for this endpoint.',
-    autoContractValidation: 'Automatic contract validation active (200 OK).',
+    autoContractValidation: 'No contract schema configured. Status and SLA will be checked.',
 
     modeSingleResponse: '⚡ Single Response',
     modeCollectionRunner: '📋 Collection Runner',
@@ -397,6 +397,7 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   useEffect(() => {
     localStorage.setItem('spectr_lang', language);
+    document.documentElement.lang = language === 'pt' ? 'pt-BR' : 'en';
   }, [language]);
 
   const setLanguage = (lang: Language) => {

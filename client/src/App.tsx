@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { api } from './api/client';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { api, getApiErrorMessage } from './api/client';
 import { TestSuite, TestRun } from './types';
-import { PostmanTopNav } from './components/PostmanTopNav';
+import { PostmanTopNav, resolveBaseUrl } from './components/PostmanTopNav';
 import { Workstation } from './components/Workstation';
 import { ChaosLab } from './components/ChaosLab';
 import { AuditLedger } from './components/AuditLedger';
@@ -10,7 +10,7 @@ import { CreateEndpointModal } from './components/CreateEndpointModal';
 import { ThemeProvider } from './context/ThemeContext';
 import { ToastProvider, useToast } from './context/ToastContext';
 import { LanguageProvider, useLanguage } from './context/LanguageContext';
-import { motion } from 'framer-motion';
+import { MotionConfig, motion } from 'framer-motion';
 
 function MainApp() {
   const { showToast } = useToast();
@@ -24,44 +24,40 @@ function MainApp() {
   const [isExecuting, setIsExecuting] = useState(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isCreateEndpointModalOpen, setIsCreateEndpointModalOpen] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const executingRef = useRef(false);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
+    setIsLoading(true);
     try {
       const [suitesRes, runsRes] = await Promise.all([
-        api.get('/suites').catch(() => ({ data: { suites: [] } })),
-        api.get('/runs?limit=30').catch(() => ({ data: { runs: [] } }))
+        api.get<{ suites: TestSuite[] }>('/suites'),
+        api.get<{ runs: TestRun[] }>('/runs?limit=30')
       ]);
-
-      const loadedSuites: TestSuite[] = suitesRes.data.suites || [];
+      const loadedSuites = suitesRes.data.suites;
       setSuites(loadedSuites);
-
-      if (loadedSuites.length > 0 && !selectedSuite) {
-        setSelectedSuite(loadedSuites[0]);
-      } else if (selectedSuite) {
-        const updated = loadedSuites.find(s => s.id === selectedSuite.id);
-        if (updated) setSelectedSuite(updated);
-      }
-
-      const runs: TestRun[] = runsRes.data.runs || [];
-      setRunsHistory(runs);
-      if (runs.length > 0 && !latestRun) {
-        try {
-          const runDetail = await api.get('/runs/' + runs[0].id);
-          setLatestRun(runDetail.data.run);
-        } catch {
-          // ignore
-        }
-      }
-    } catch (err) {
-      console.error('Falha ao carregar dados do Fastify:', err);
+      setSelectedSuite(current => loadedSuites.find(suite => suite.id === current?.id) || loadedSuites[0] || null);
+      setRunsHistory(runsRes.data.runs);
+      setLoadError(null);
+    } catch (error) {
+      setLoadError(getApiErrorMessage(error));
+    } finally {
+      setIsLoading(false);
     }
-  };
-
-  useEffect(() => {
-    loadData();
   }, []);
 
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
   const handleRunSuite = async (suiteId: string) => {
+    if (executingRef.current) return;
+    const suite = suites.find(item => item.id === suiteId);
+    if (!suite) return;
+    executingRef.current = true;
+    setSelectedSuite(suite);
+    setLatestRun(null);
     try {
       setIsExecuting(true);
       showToast({
@@ -70,7 +66,7 @@ function MainApp() {
         message: 'Disparando chamadas sequenciais e calculando latência p95/p99...'
       });
 
-      const res = await api.post('/suites/' + suiteId + '/run');
+      const res = await api.post('/suites/' + suiteId + '/run', { baseUrl: resolveBaseUrl(suite, environment) });
       const runId = res.data.runId;
       
       const runDetail = await api.get('/runs/' + runId);
@@ -87,9 +83,10 @@ function MainApp() {
       showToast({
         type: 'error',
         title: 'Falha na Execução',
-        message: err.message || 'Verifique se o backend Fastify está ativo.'
+        message: getApiErrorMessage(err)
       });
     } finally {
+      executingRef.current = false;
       setIsExecuting(false);
     }
   };
@@ -103,16 +100,20 @@ function MainApp() {
     } else {
       showToast({
         type: 'info',
-        title: 'Demo PayStream',
-        message: 'Carregando suíte PayStream Core Banking...'
+        title: 'Nenhuma coleção disponível',
+        message: 'Crie uma coleção e adicione endpoints para executar os testes.'
       });
     }
   };
 
   const handleCreateSuite = async (data: { name: string; description?: string; baseUrl: string }) => {
     try {
-      await api.post('/suites', data);
+      const created = await api.post('/suites', data);
       await loadData();
+      if (created.data.suite) {
+        setSelectedSuite({ ...created.data.suite, cases: [] });
+        setLatestRun(null);
+      }
       showToast({
         type: 'success',
         title: 'Coleção Criada',
@@ -122,8 +123,9 @@ function MainApp() {
       showToast({
         type: 'error',
         title: 'Erro ao criar coleção',
-        message: err.message
+        message: getApiErrorMessage(err)
       });
+      throw err;
     }
   };
 
@@ -141,8 +143,9 @@ function MainApp() {
       showToast({
         type: 'error',
         title: 'Erro ao adicionar endpoint',
-        message: err.message
+        message: getApiErrorMessage(err)
       });
+      throw err;
     }
   };
 
@@ -152,12 +155,13 @@ function MainApp() {
       await api.patch('/suites/' + selectedSuite.id, { baseUrl: newUrl });
       await loadData();
     } catch (err: any) {
-      console.error(err);
+      showToast({ type: 'error', title: 'Erro ao atualizar URL', message: getApiErrorMessage(err) });
+      throw err;
     }
   };
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-pm-light-bg dark:bg-pm-dark-bg text-pm-light-text dark:text-pm-dark-text transition-colors duration-200">
+    <div className="flex flex-col h-dvh w-full overflow-hidden bg-pm-light-bg dark:bg-pm-dark-bg text-pm-light-text dark:text-pm-dark-text transition-colors duration-200">
       
       {/* 1. Global Postman Topbar */}
       <PostmanTopNav
@@ -168,13 +172,23 @@ function MainApp() {
         isExecuting={isExecuting}
         onRunDemo={handleRunDemo}
         environment={environment}
-        setEnvironment={setEnvironment}
+        setEnvironment={(value) => { setEnvironment(value); setLatestRun(null); }}
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
       />
 
+      {loadError && (
+        <div role="alert" className="flex shrink-0 items-center justify-between gap-3 border-b border-rose-500/30 bg-rose-500/10 px-4 py-2 text-xs">
+          <span>{loadError}</span>
+          <button onClick={() => void loadData()} disabled={isLoading} className="shrink-0 font-semibold text-pm-orange disabled:opacity-50">
+            {isLoading ? 'Carregando...' : 'Tentar novamente'}
+          </button>
+        </div>
+      )}
+      {isLoading && !suites.length && !loadError && <div role="status" className="shrink-0 px-4 py-2 text-xs text-pm-orange">Carregando coleções...</div>}
+
       {/* 2. Main Workstation Area com Renderização Direta e Fluid Motion */}
-      <div className="flex-1 flex overflow-hidden relative w-full h-full">
+      <div className="flex-1 min-h-0 flex overflow-hidden relative w-full">
         {activeView === 'workstation' && (
           <motion.div
             key="workstation"
@@ -186,7 +200,7 @@ function MainApp() {
             <Workstation
               suites={suites}
               selectedSuite={selectedSuite}
-              onSelectSuite={setSelectedSuite}
+              onSelectSuite={(suite) => { setSelectedSuite(suite); setLatestRun(null); }}
               onRunSuite={handleRunSuite}
               latestRun={latestRun}
               isExecuting={isExecuting}
@@ -226,9 +240,11 @@ function MainApp() {
                 try {
                   const runDetail = await api.get('/runs/' + r.id);
                   setLatestRun(runDetail.data.run);
+                  const suite = suites.find(item => item.id === runDetail.data.run.suiteId);
+                  if (suite) setSelectedSuite(suite);
                   setActiveView('workstation');
-                } catch {
-                  setActiveView('workstation');
+                } catch (error) {
+                  showToast({ type: 'error', title: 'Erro ao carregar execução', message: getApiErrorMessage(error) });
                 }
               }}
             />
@@ -256,6 +272,7 @@ function MainApp() {
 
 export function App() {
   return (
+    <MotionConfig reducedMotion="user">
     <ThemeProvider>
       <LanguageProvider>
         <ToastProvider>
@@ -263,6 +280,7 @@ export function App() {
         </ToastProvider>
       </LanguageProvider>
     </ThemeProvider>
+    </MotionConfig>
   );
 }
 

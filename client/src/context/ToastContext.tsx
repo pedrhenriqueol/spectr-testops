@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { CheckCircle2, AlertTriangle, Info, XCircle, X } from 'lucide-react';
 
@@ -17,18 +17,28 @@ const ToastContext = createContext<ToastContextType | undefined>(undefined);
 
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+
+  useEffect(() => () => {
+    timers.current.forEach(timer => clearTimeout(timer));
+    timers.current.clear();
+  }, []);
 
   const showToast = useCallback((toast: Omit<Toast, 'id'>) => {
-    const id = Math.random().toString(36).substring(2, 9);
+    const id = crypto.randomUUID();
     const newToast: Toast = { ...toast, id };
-    setToasts((prev) => [...prev, newToast]);
+    setToasts((prev) => [...prev.slice(-2), newToast]);
 
-    setTimeout(() => {
+    timers.current.set(id, setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 3800);
+      timers.current.delete(id);
+    }, toast.type === 'error' ? 7000 : 4500));
   }, []);
 
   const removeToast = (id: string) => {
+    const timer = timers.current.get(id);
+    if (timer) clearTimeout(timer);
+    timers.current.delete(id);
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
@@ -36,11 +46,13 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     <ToastContext.Provider value={{ showToast }}>
       {children}
       {/* Toast Overlay Container */}
-      <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm pointer-events-none">
+      <div className="fixed bottom-4 left-4 sm:left-auto right-4 z-[60] flex flex-col gap-2 sm:max-w-sm pointer-events-none">
         <AnimatePresence>
           {toasts.map((toast) => (
             <motion.div
               key={toast.id}
+              role={toast.type === 'error' ? 'alert' : 'status'}
+              aria-atomic="true"
               initial={{ opacity: 0, y: 16, scale: 0.96 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 8, scale: 0.96 }}
@@ -70,6 +82,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               </div>
 
               <button
+                aria-label="Fechar notificação"
                 onClick={() => removeToast(toast.id)}
                 className="opacity-50 hover:opacity-100 transition-opacity p-0.5 -mr-1 -mt-0.5 cursor-pointer"
               >

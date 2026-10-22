@@ -1,7 +1,6 @@
 import React from 'react';
-import { Database, Clock, CheckCircle2, XCircle, ArrowUpRight, Activity, ShieldCheck } from 'lucide-react';
+import { Database, Clock, CheckCircle2, XCircle } from 'lucide-react';
 import { TestRun } from '../types';
-import { motion } from 'framer-motion';
 import { useLanguage } from '../context/LanguageContext';
 
 interface AuditLedgerProps {
@@ -10,52 +9,20 @@ interface AuditLedgerProps {
 }
 
 export const AuditLedger: React.FC<AuditLedgerProps> = ({ runs = [], onSelectRun }) => {
-  const { t } = useLanguage();
-  const safeRuns = Array.isArray(runs) && runs.length > 0 ? runs : [
-    {
-      id: 'run_ps_live_01',
-      suiteId: 'suite_paystream',
-      workspaceId: 'default',
-      status: 'PASSED' as const,
-      totalTests: 5,
-      passedTests: 5,
-      failedTests: 0,
-      totalDurationMs: 8550,
-      p95LatencyMs: 3725,
-      p99LatencyMs: 4120,
-      successRate: 100,
-      triggeredBy: 'MANUAL_DASHBOARD',
-      createdAt: new Date(Date.now() - 3600000).toISOString(),
-      suite: { id: 'suite_paystream', name: 'PayStream Gateway ── Core Banking & Resilience Suite', baseUrl: 'https://paystream-gateway.onrender.com/api/v1' }
-    },
-    {
-      id: 'run_ps_live_02',
-      suiteId: 'suite_chaos',
-      workspaceId: 'default',
-      status: 'PASSED' as const,
-      totalTests: 3,
-      passedTests: 3,
-      failedTests: 0,
-      totalDurationMs: 2450,
-      p95LatencyMs: 820,
-      p99LatencyMs: 950,
-      successRate: 100,
-      triggeredBy: 'SCHEDULED_CRON',
-      createdAt: new Date(Date.now() - 86400000).toISOString(),
-      suite: { id: 'suite_chaos', name: 'Chaos & Latency Fault Tolerance Benchmark', baseUrl: 'http://localhost:3335/api/v1/chaos' }
-    }
-  ];
+  const { t, language } = useLanguage();
+  const safeRuns = Array.isArray(runs) ? runs : [];
+  const locale = language === 'pt' ? 'pt-BR' : 'en-US';
 
   return (
-    <div className="w-full h-full overflow-y-auto p-6 bg-pm-light-bg dark:bg-pm-dark-bg transition-colors duration-200">
+    <div className="w-full h-full overflow-y-auto p-3 sm:p-6 bg-pm-light-bg dark:bg-pm-dark-bg transition-colors duration-200">
       <div className="max-w-6xl mx-auto space-y-4">
         
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-bold text-pm-light-text dark:text-pm-dark-text flex items-center gap-2">
               <Database className="w-5 h-5 text-pm-orange" />
-              Audit Ledger & Test Run History
+              {t.auditTitle}
             </h2>
             <p className="text-xs text-pm-light-textMuted dark:text-pm-dark-textMuted mt-0.5">
               {t.auditSubtitle}
@@ -65,16 +32,13 @@ export const AuditLedger: React.FC<AuditLedgerProps> = ({ runs = [], onSelectRun
             <span className="text-xs font-mono px-2.5 py-1 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border text-pm-light-text dark:text-pm-dark-text">
               {t.totalExecutions}: <strong>{safeRuns.length}</strong>
             </span>
-            <span className="text-xs font-mono px-2.5 py-1 rounded bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 flex items-center gap-1 font-semibold">
-              <ShieldCheck className="w-3.5 h-3.5" />
-              {t.auditVerifiedBadge}
-            </span>
           </div>
         </div>
 
         {/* Ledger Table */}
-        <div className="rounded-lg bg-pm-light-surface dark:bg-pm-dark-surface border border-pm-light-border dark:border-pm-dark-border overflow-hidden shadow-sm">
-          <table className="w-full text-left font-mono text-xs">
+        <div className="rounded-lg bg-pm-light-surface dark:bg-pm-dark-surface border border-pm-light-border dark:border-pm-dark-border overflow-x-auto shadow-sm">
+          <table className="w-full min-w-[760px] text-left font-mono text-xs">
+            <caption className="sr-only">{t.auditTitle}</caption>
             <thead className="bg-pm-light-panel dark:bg-pm-dark-panel border-b border-pm-light-border dark:border-pm-dark-border text-[10px] text-pm-light-textMuted dark:text-pm-dark-textMuted uppercase">
               <tr>
                 <th className="px-4 py-2.5">{t.colRunId}</th>
@@ -88,23 +52,41 @@ export const AuditLedger: React.FC<AuditLedgerProps> = ({ runs = [], onSelectRun
               </tr>
             </thead>
             <tbody className="divide-y divide-pm-light-border dark:divide-pm-dark-border text-[11px]">
+              {safeRuns.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="px-4 py-12 text-center text-pm-light-textMuted dark:text-pm-dark-textMuted">
+                    {t.noExecutionsFound}
+                  </td>
+                </tr>
+              )}
               {safeRuns.map((r) => (
                 <tr
                   key={r.id}
-                  onClick={() => onSelectRun && onSelectRun(r as any)}
-                  className="hover:bg-pm-light-panelHover dark:hover:bg-pm-dark-panelHover transition-colors cursor-pointer"
+                  className="hover:bg-pm-light-panelHover dark:hover:bg-pm-dark-panelHover transition-colors"
                 >
                   <td className="px-4 py-3 text-pm-orange font-bold">
-                    #{r.id.slice(0, 8)}
+                    <button
+                      type="button"
+                      disabled={!onSelectRun}
+                      onClick={() => onSelectRun?.(r)}
+                      className="underline-offset-4 hover:underline focus-visible:underline rounded disabled:no-underline"
+                      aria-label={`${t.colRunId}: ${r.id}`}
+                    >
+                      #{r.id.slice(0, 8)}
+                    </button>
                   </td>
                   <td className="px-4 py-3">
                     {r.status === 'PASSED' ? (
                       <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 font-bold text-[10px] flex items-center gap-1 w-fit">
                         <CheckCircle2 className="w-3 h-3" /> PASS
                       </span>
-                    ) : (
+                    ) : r.status === 'FAILED' ? (
                       <span className="px-2 py-0.5 rounded bg-rose-500/15 text-rose-500 border border-rose-500/30 font-bold text-[10px] flex items-center gap-1 w-fit">
                         <XCircle className="w-3 h-3" /> FAIL
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 font-bold text-[10px] flex items-center gap-1 w-fit">
+                        <Clock className="w-3 h-3" /> {r.status}
                       </span>
                     )}
                   </td>
@@ -124,7 +106,7 @@ export const AuditLedger: React.FC<AuditLedgerProps> = ({ runs = [], onSelectRun
                     {r.totalDurationMs}ms
                   </td>
                   <td className="px-4 py-3 text-right text-pm-light-textMuted dark:text-pm-dark-textMuted font-mono text-[10px]">
-                    {new Date(r.createdAt).toLocaleString('pt-BR')}
+                    {new Date(r.createdAt).toLocaleString(locale)}
                   </td>
                 </tr>
               ))}

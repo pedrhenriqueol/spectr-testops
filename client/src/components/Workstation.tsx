@@ -6,10 +6,10 @@ import {
   ExternalLink, Edit3, Download, FileSpreadsheet, FileCode, CheckCheck, Globe
 } from 'lucide-react';
 import { TestSuite, TestCase, TestRun, HttpMethod, SingleResponse } from '../types';
-import { api } from '../api/client';
+import { api, getApiErrorMessage } from '../api/client';
 import { useToast } from '../context/ToastContext';
 import { useLanguage } from '../context/LanguageContext';
-import { ENVIRONMENTS_MAP } from './PostmanTopNav';
+import { ENVIRONMENTS_MAP, resolveBaseUrl } from './PostmanTopNav';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface WorkstationProps {
@@ -25,6 +25,14 @@ interface WorkstationProps {
   searchQuery?: string;
   setSearchQuery?: (q: string) => void;
   environment?: string;
+}
+
+function parseJsonOrText(value: string): unknown {
+  try { return JSON.parse(value); } catch { return value; }
+}
+
+function assertionPassed(result: { statusMatch: boolean; slaPassed: boolean; schemaValid: boolean; errorMessage?: string | null }): boolean {
+  return result.statusMatch && result.slaPassed && result.schemaValid && !result.errorMessage;
 }
 
 // Componente de Syntax Highlighter de JSON customizado e limpo
@@ -43,9 +51,9 @@ const JsonSyntaxView: React.FC<{ data: any; raw: string }> = ({ data, raw }) => 
 
   const highlightLine = (line: string) => {
     // Regex para identificar chaves, strings, números, booleanos e nulos
-    const parts = line.split(/(".*?"|\b(?:true|false|null)\b|-?\d+(?:\.\d+)?)/g);
+    const parts = line.split(/("(?:\\.|[^"\\])*"|\b(?:true|false|null)\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g);
     return parts.map((part, index) => {
-      if (/^".*?"\s*:/.test(part) || /^".*?"$/.test(part) && line.indexOf(part + ':') !== -1) {
+      if (/^"/.test(part) && /^\s*:/.test(parts[index + 1] || '')) {
         return <span key={index} className="text-pm-orange font-semibold">{part}</span>;
       }
       if (/^".*?"$/.test(part)) {
@@ -57,7 +65,7 @@ const JsonSyntaxView: React.FC<{ data: any; raw: string }> = ({ data, raw }) => 
       if (/^\bnull\b$/.test(part)) {
         return <span key={index} className="text-slate-400 italic">{part}</span>;
       }
-      if (/^-?\d+(?:\.\d+)?$/.test(part)) {
+      if (/^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(part)) {
         return <span key={index} className="text-sky-400 font-mono">{part}</span>;
       }
       return <span key={index} className="text-pm-light-text dark:text-slate-300">{part}</span>;
@@ -113,14 +121,16 @@ export const Workstation: React.FC<WorkstationProps> = ({
   environment = 'production'
 }) => {
   const { showToast } = useToast();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const [selectedCase, setSelectedCase] = useState<TestCase | null>(null);
   const [localSearch, setLocalSearch] = useState('');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [activeRequestTab, setActiveRequestTab] = useState<'assertions' | 'headers' | 'body' | 'schema'>('assertions');
   
   // Single Request Runner State
   const [singleResponse, setSingleResponse] = useState<SingleResponse | null>(null);
   const [isSendingSingle, setIsSendingSingle] = useState(false);
+  const [requestError, setRequestError] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const [responseMode, setResponseMode] = useState<'single' | 'collection'>('single');
   const [activeSingleTab, setActiveSingleTab] = useState<'body' | 'tests' | 'headers'>('body');
@@ -129,23 +139,56 @@ export const Workstation: React.FC<WorkstationProps> = ({
   const [copied, setCopied] = useState(false);
   const [isEditingUrl, setIsEditingUrl] = useState(false);
   const [editedUrl, setEditedUrl] = useState('');
+  const [isSavingUrl, setIsSavingUrl] = useState(false);
+  const [urlError, setUrlError] = useState<string | null>(null);
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   const [showResolvedUrl, setShowResolvedUrl] = useState(false);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Termo de busca unificado
   const activeQuery = searchQuery || localSearch;
 
   // Sincroniza caso ativo
   const activeCases = selectedSuite?.cases || [];
-  const currentCase = selectedCase || (activeCases.length > 0 ? activeCases[0] : null);
+  const currentCase = activeCases.find(item => item.id === selectedCase?.id) || activeCases[0] || null;
 
   // Determina a Base URL efetiva conforme o Environment selecionado
   const activeEnvConfig = ENVIRONMENTS_MAP[environment] || ENVIRONMENTS_MAP.production;
-  const effectiveBaseUrl = useMemo(() => {
-    if (environment === 'local') return 'http://localhost:3334/api/v1';
-    if (environment === 'staging') return 'https://staging-api.spectr-ops.internal/api/v1';
-    return selectedSuite?.baseUrl || 'https://paystream-gateway.onrender.com/api/v1';
-  }, [environment, selectedSuite]);
+  const effectiveBaseUrl = resolveBaseUrl(selectedSuite, environment);
+  const requestUrl = currentCase?.path.match(/^https?:\/\//i)
+    ? currentCase.path
+    : `${effectiveBaseUrl.replace(/\/+$/, '')}/${currentCase?.path.replace(/^\/+/, '') || ''}`;
+  const requestHeaders = useMemo<Record<string, string>>(() => {
+    const suiteHeaders = selectedSuite?.headers ? parseJsonOrText(selectedSuite.headers) : {};
+    const caseHeaders = currentCase?.headers ? parseJsonOrText(currentCase.headers) : {};
+    return {
+      'Content-Type': 'application/json',
+      ...(typeof suiteHeaders === 'object' && suiteHeaders !== null ? suiteHeaders : {}),
+      ...(typeof caseHeaders === 'object' && caseHeaders !== null ? caseHeaders : {})
+    };
+  }, [selectedSuite?.headers, currentCase?.headers]);
+
+  useEffect(() => {
+    setIsEditingUrl(false);
+    setUrlError(null);
+  }, [selectedSuite?.id, environment]);
+
+  useEffect(() => {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    setIsSendingSingle(false);
+    setSingleResponse(null);
+    setRequestError(null);
+    return () => { abortControllerRef.current?.abort(); };
+  }, [currentCase?.id, effectiveBaseUrl]);
+
+  useEffect(() => {
+    if (isExecuting || latestRun) setResponseMode('collection');
+  }, [isExecuting, latestRun?.id]);
+
+  useEffect(() => () => {
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+  }, []);
 
   // Filtra casos de teste em tempo real com memoização
   const filteredCases = useMemo(() => {
@@ -156,169 +199,81 @@ export const Workstation: React.FC<WorkstationProps> = ({
     );
   }, [activeCases, activeQuery]);
 
-  const handleCopy = (text: string, label = 'Payload') => {
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    showToast({
-      type: 'success',
-      title: `${label} copiado!`,
-      message: 'Conteúdo transferido para a área de transferência.'
-    });
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const handleSaveBaseUrl = async () => {
-    if (editedUrl.trim() && onUpdateBaseUrl) {
-      await onUpdateBaseUrl(editedUrl.trim());
-      setIsEditingUrl(false);
-      showToast({
-        type: 'success',
-        title: 'Base URL atualizada',
-        message: editedUrl.trim()
-      });
+  const handleCopy = async (text: string, label = 'Payload') => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      showToast({ type: 'success', title: `${label} copiado!`, message: 'Conteúdo transferido para a área de transferência.' });
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setCopied(false), 2000);
+    } catch {
+      showToast({ type: 'error', title: 'Não foi possível copiar', message: 'Selecione o conteúdo e copie com o teclado.' });
     }
   };
 
-  // 1. DISPARO INDIVIDUAL DE REQUEST (SEND BUTTON & SUPORTE A ABORT CONTROLLER)
-  const handleSendSingle = async () => {
-    if (!currentCase) return;
+  const handleSaveBaseUrl = async () => {
+    if (!onUpdateBaseUrl || isSavingUrl) return;
+    try {
+      const url = new URL(editedUrl.trim());
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
+        setUrlError('Use uma URL HTTP(S) sem credenciais.');
+        return;
+      }
+      setIsSavingUrl(true);
+      setUrlError(null);
+      await onUpdateBaseUrl(editedUrl.trim());
+      setIsEditingUrl(false);
+      showToast({ type: 'success', title: 'Base URL atualizada', message: editedUrl.trim() });
+    } catch (error) {
+      setUrlError(error instanceof TypeError ? 'Informe uma URL HTTP(S) válida.' : getApiErrorMessage(error));
+    } finally {
+      setIsSavingUrl(false);
+    }
+  };
 
-    // Se já estiver enviando, permite cancelar a requisição em curso
-    if (isSendingSingle && abortControllerRef.current) {
+  // Send sempre apresenta a resposta real do motor; falhas de rede não viram resultados de teste.
+  const handleSendSingle = async () => {
+    if (!currentCase || isExecuting) return;
+    if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
       setIsSendingSingle(false);
-      showToast({
-        type: 'info',
-        title: 'Requisição Interrompida',
-        message: 'A chamada HTTP foi cancelada pelo operador.'
-      });
+      showToast({ type: 'info', title: 'Espera cancelada', message: 'O motor pode concluir a chamada já enviada ao destino.' });
       return;
     }
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
-
+    setIsSendingSingle(true);
+    setSingleResponse(null);
+    setRequestError(null);
+    setResponseMode('single');
     try {
-      setIsSendingSingle(true);
-
-      let resultData: SingleResponse | null = null;
-
-      try {
-        // Tenta executar via endpoint dedicado do backend Fastify com sinal de abort
-        const res = await api.post(`/cases/${currentCase.id}/run`, {}, {
-          signal: controller.signal
-        });
-        resultData = res.data;
-      } catch (err: any) {
-        if (err.name === 'CanceledError' || err.name === 'AbortError') {
-          return; // Cancelamento intencional
-        }
-
-        // Fallback resiliente no cliente com medição real de latência
-        const startTime = performance.now();
-        const targetUrl = currentCase.path.startsWith('http')
-          ? currentCase.path
-          : `${effectiveBaseUrl.replace(/\/+$/, '')}/${currentCase.path.replace(/^\/+/, '')}`;
-
-        let status = 200;
-        let statusText = 'OK';
-        let bodyData: any = null;
-        let rawBodyStr = '';
-        let headersObj: Record<string, string> = {
-          'content-type': 'application/json; charset=utf-8',
-          'server': 'Fastify/4.26 (Spectr-Engine)',
-          'x-powered-by': 'Spectr TestOps',
-          'x-environment': environment,
-          'date': new Date().toUTCString()
-        };
-
-        try {
-          const fetchRes = await fetch(targetUrl, {
-            method: currentCase.method,
-            headers: currentCase.headers ? JSON.parse(currentCase.headers) : { 'Content-Type': 'application/json' },
-            body: ['POST', 'PUT', 'PATCH'].includes(currentCase.method) ? currentCase.body || undefined : undefined,
-            signal: controller.signal
-          });
-          status = fetchRes.status;
-          statusText = fetchRes.statusText || 'OK';
-          rawBodyStr = await fetchRes.text();
-          try {
-            bodyData = JSON.parse(rawBodyStr);
-          } catch {
-            bodyData = rawBodyStr;
-          }
-          fetchRes.headers.forEach((val, key) => {
-            headersObj[key] = val;
-          });
-        } catch {
-          // Mock sintético de alta fidelidade
-          if (currentCase.path.includes('health')) {
-            bodyData = { status: 'healthy', timestamp: new Date().toISOString(), service: 'paystream-gateway', uptime: 384920 };
-          } else if (currentCase.path.includes('login')) {
-            bodyData = { success: true, token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkZW1vLW1lcmNoYW50In0', merchant: { id: 'mch_01', name: 'TechStore Brasil' } };
-          } else if (currentCase.path.includes('transactions')) {
-            bodyData = {
-              total: 2,
-              transactions: [
-                { id: 'tx_984127', amountCents: 45990, status: 'SETTLED', method: 'PIX', customer: 'João Silva' },
-                { id: 'tx_984128', amountCents: 120000, status: 'PROCESSING', method: 'CREDIT_CARD', customer: 'Ana Costa' }
-              ]
-            };
-          } else {
-            bodyData = { success: true, message: 'Request executado com sucesso.', path: currentCase.path, timestamp: new Date().toISOString() };
-          }
-          rawBodyStr = JSON.stringify(bodyData, null, 2);
-        }
-
-        const endTime = performance.now();
-        const latencyMs = Math.max(12, Math.round(endTime - startTime));
-        const byteSize = new TextEncoder().encode(rawBodyStr).length;
-
-        resultData = {
-          caseId: currentCase.id,
-          name: currentCase.name,
-          method: currentCase.method,
-          url: targetUrl,
-          actualStatus: status,
-          statusText,
-          statusMatch: status === currentCase.expectedStatus,
-          expectedStatus: currentCase.expectedStatus,
-          latencyMs,
-          slaPassed: latencyMs <= currentCase.maxLatencyMs,
-          maxLatencyMs: currentCase.maxLatencyMs,
-          schemaValid: true,
-          responseHeaders: headersObj,
-          responseBody: bodyData,
-          rawBody: rawBodyStr,
-          responseSize: byteSize > 1024 ? `${(byteSize / 1024).toFixed(2)} KB` : `${byteSize} B`,
-          timestamp: new Date().toISOString()
-        };
-      }
-
-      if (resultData) {
-        setSingleResponse(resultData);
-        setResponseMode('single');
-        showToast({
-          type: resultData.statusMatch ? 'success' : 'warn',
-          title: `HTTP ${resultData.actualStatus} ${resultData.statusText}`,
-          message: `Latência: ${resultData.latencyMs}ms (SLA: ${resultData.maxLatencyMs}ms)`
-        });
-      }
-    } catch (err: any) {
-      console.error('Erro na execução individual:', err);
+      const response = await api.post<SingleResponse>(`/cases/${currentCase.id}/run`, { baseUrl: effectiveBaseUrl }, { signal: controller.signal });
+      if (controller.signal.aborted) return;
+      const result = response.data;
+      setSingleResponse(result);
       showToast({
-        type: 'error',
-        title: 'Falha no disparo da requisição',
-        message: err.message || 'Erro inesperado'
+        type: assertionPassed(result) ? 'success' : 'warn',
+        title: result.actualStatus ? `HTTP ${result.actualStatus} ${result.statusText || ''}` : 'Falha na chamada ao destino',
+        message: result.errorMessage || `Latência: ${result.latencyMs}ms (SLA: ${result.maxLatencyMs}ms)`
       });
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      const message = getApiErrorMessage(error);
+      setRequestError(message);
+      showToast({ type: 'error', title: 'Falha no disparo da requisição', message });
     } finally {
-      setIsSendingSingle(false);
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+        setIsSendingSingle(false);
+      }
     }
   };
 
   // 3. EXPORTAÇÃO REAL DE RELATÓRIO DE CONFORMIDADE (EXPORT SLA REPORT)
   const handleExportReport = (format: 'json' | 'csv') => {
+    if (!(responseMode === 'single' ? singleResponse : latestRun)) return;
     const reportTimestamp = new Date().toISOString();
     const suiteName = selectedSuite?.name || 'Spectr-Suite';
     const cleanSuiteName = suiteName.replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -330,6 +285,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
       const reportData = {
         title: 'SPECTR TestOps SLA & API Compliance Technical Report',
         generatedAt: reportTimestamp,
+        responseMode,
         environment: {
           id: environment,
           name: activeEnvConfig.name,
@@ -340,7 +296,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
           name: selectedSuite?.name,
           baseUrl: effectiveBaseUrl
         },
-        executionSnapshot: latestRun ? {
+        executionSnapshot: responseMode === 'collection' && latestRun ? {
           runId: latestRun.id,
           status: latestRun.status,
           successRate: `${latestRun.successRate}%`,
@@ -352,7 +308,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
           totalDurationMs: latestRun.totalDurationMs,
           assertions: latestRun.assertions
         } : null,
-        activeSingleResponse: singleResponse
+        activeSingleResponse: responseMode === 'single' ? singleResponse : null
       };
 
       const blob = new Blob([JSON.stringify(reportData, null, 2)], { type: 'application/json' });
@@ -368,26 +324,26 @@ export const Workstation: React.FC<WorkstationProps> = ({
       const headers = ['Test Name', 'Method', 'Endpoint', 'HTTP Status', 'Expected Status', 'Status Match', 'Latency (ms)', 'SLA Target (ms)', 'SLA Passed', 'Schema Valid', 'Result', 'Error Message'];
       const rows: string[][] = [];
 
-      if (latestRun?.assertions && latestRun.assertions.length > 0) {
+      if (responseMode === 'collection' && latestRun?.assertions && latestRun.assertions.length > 0) {
         latestRun.assertions.forEach(ast => {
           rows.push([
-            `"${ast.name.replace(/"/g, '""')}"`,
+            ast.name,
             ast.method,
             ast.endpoint,
             String(ast.actualStatus),
             String(ast.expectedStatus),
             ast.statusMatch ? 'PASS' : 'FAIL',
             String(ast.latencyMs),
-            '1500',
+            '',
             ast.slaPassed ? 'YES' : 'NO',
             ast.schemaValid ? 'YES' : 'NO',
-            ast.statusMatch ? 'PASS' : 'FAIL',
-            `"${(ast.errorMessage || '').replace(/"/g, '""')}"`
+            assertionPassed(ast) ? 'PASS' : 'FAIL',
+            ast.errorMessage || ''
           ]);
         });
-      } else if (singleResponse) {
+      } else if (responseMode === 'single' && singleResponse) {
         rows.push([
-          `"${singleResponse.name.replace(/"/g, '""')}"`,
+          singleResponse.name,
           singleResponse.method,
           singleResponse.url,
           String(singleResponse.actualStatus),
@@ -397,15 +353,16 @@ export const Workstation: React.FC<WorkstationProps> = ({
           String(singleResponse.maxLatencyMs),
           singleResponse.slaPassed ? 'YES' : 'NO',
           singleResponse.schemaValid ? 'YES' : 'NO',
-          singleResponse.statusMatch ? 'PASS' : 'FAIL',
-          `"${(singleResponse.errorMessage || '').replace(/"/g, '""')}"`
+          assertionPassed(singleResponse) ? 'PASS' : 'FAIL',
+          singleResponse.errorMessage || ''
         ]);
-      } else {
-        // Gera linha de exemplo se não houver run ainda
-        rows.push(['PayStream Liveness Check', 'GET', '/health', '200', '200', 'PASS', '42', '250', 'YES', 'YES', 'PASS', '']);
       }
 
-      const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+      const csvCell = (value: string) => {
+        const safe = /^[\s]*[=+@-]/.test(value) ? `'${value}` : value;
+        return `"${safe.replace(/"/g, '""')}"`;
+      };
+      const csvContent = [headers.join(','), ...rows.map(row => row.map(csvCell).join(','))].join('\n');
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -447,10 +404,16 @@ export const Workstation: React.FC<WorkstationProps> = ({
   };
 
   return (
-    <div className="flex-1 flex overflow-hidden bg-pm-light-bg dark:bg-pm-dark-bg transition-colors duration-200 select-none">
+    <div className="flex-1 min-w-0 flex flex-col md:flex-row overflow-hidden bg-pm-light-bg dark:bg-pm-dark-bg transition-colors duration-200 select-none">
       
-      {/* ── COLUNA ESQUERDA (320px): POSTMAN COLLECTIONS SIDEBAR ── */}
-      <div className="w-80 bg-pm-light-sidebar dark:bg-pm-dark-sidebar border-r border-pm-light-border dark:border-pm-dark-border flex flex-col shrink-0">
+      <div className="md:hidden flex shrink-0 items-center justify-between gap-3 border-b border-pm-light-border dark:border-pm-dark-border bg-pm-light-sidebar dark:bg-pm-dark-sidebar px-3 py-2 text-xs">
+        <button className="flex shrink-0 items-center gap-1.5 font-semibold text-pm-orange" aria-expanded={isSidebarOpen} aria-controls="collections-sidebar" onClick={() => setIsSidebarOpen(open => !open)}>
+          <Folder className="h-3.5 w-3.5" />{t.collectionsHeader}<ChevronDown className={`h-3 w-3 transition-transform ${isSidebarOpen ? 'rotate-180' : ''}`} />
+        </button>
+        <span className="truncate text-[11px] text-pm-light-textMuted dark:text-pm-dark-textMuted">{currentCase?.name || selectedSuite?.name || t.selectCollectionPrompt}</span>
+      </div>
+      {/* ── POSTMAN COLLECTIONS SIDEBAR ── */}
+      <div id="collections-sidebar" role="region" aria-label={t.collectionsHeader} className={`${isSidebarOpen ? 'flex' : 'hidden'} md:flex w-full md:w-72 lg:w-80 max-h-[50%] md:max-h-none bg-pm-light-sidebar dark:bg-pm-dark-sidebar border-r border-pm-light-border dark:border-pm-dark-border flex-col shrink-0`}>
         
         {/* Collections Toolbar */}
         <div className="p-3 border-b border-pm-light-border dark:border-pm-dark-border space-y-2.5">
@@ -484,7 +447,9 @@ export const Workstation: React.FC<WorkstationProps> = ({
           <div className="relative">
             <Search className="w-3.5 h-3.5 text-pm-light-textMuted dark:text-pm-dark-textMuted absolute left-2.5 top-1/2 -translate-y-1/2" />
             <input
-              type="text"
+              id="collection-search"
+              aria-label={t.filterPlaceholder}
+              type="search"
               value={activeQuery}
               onChange={(e) => {
                 setLocalSearch(e.target.value);
@@ -506,6 +471,8 @@ export const Workstation: React.FC<WorkstationProps> = ({
           {suites.map((s) => (
             <button
               key={s.id}
+              disabled={isExecuting}
+              aria-pressed={selectedSuite?.id === s.id}
               onClick={() => {
                 onSelectSuite(s);
                 setSelectedCase(s.cases[0] || null);
@@ -541,18 +508,22 @@ export const Workstation: React.FC<WorkstationProps> = ({
               {/* Request Items */}
               <div className="pl-3 space-y-0.5">
                 {filteredCases.length === 0 ? (
-                  <p className="py-4 text-center text-xs text-pm-light-textMuted dark:text-pm-dark-textMuted">
-                    {t.noRequestsFound}
-                  </p>
+                  <div className="py-4 text-center text-xs text-pm-light-textMuted dark:text-pm-dark-textMuted space-y-2">
+                    <p>{activeCases.length ? t.noRequestsFound : t.noRequestSelected}</p>
+                    {!activeCases.length && <button className="font-semibold text-pm-orange hover:underline" onClick={onOpenCreateEndpointModal}>{t.createEndpointTitle}</button>}
+                  </div>
                 ) : (
                   filteredCases.map((c) => {
                     const isCurrent = currentCase?.id === c.id;
                     return (
-                      <motion.div
+                      <motion.button
+                        type="button"
+                        aria-pressed={isCurrent}
+                        title={`${c.method} ${c.path}`}
                         key={c.id}
                         whileHover={{ x: 2 }}
-                        onClick={() => setSelectedCase(c)}
-                        className={`px-2.5 py-1.5 rounded flex items-center justify-between gap-2 cursor-pointer transition-colors text-xs ${
+                        onClick={() => { setSelectedCase(c); setIsSidebarOpen(false); }}
+                        className={`w-full text-left min-h-9 px-2.5 py-1.5 rounded flex items-center justify-between gap-2 cursor-pointer transition-colors text-xs ${
                           isCurrent
                             ? 'bg-pm-light-panelHover dark:bg-pm-dark-panelHover border-l-2 border-pm-orange text-pm-light-text dark:text-pm-dark-text font-medium'
                             : 'hover:bg-pm-light-panel dark:hover:bg-pm-dark-panel text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-light-text dark:hover:text-pm-dark-text'
@@ -569,14 +540,18 @@ export const Workstation: React.FC<WorkstationProps> = ({
                         <span className="text-[10px] font-mono text-pm-light-textMuted dark:text-pm-dark-textMuted shrink-0">
                           {c.maxLatencyMs}ms
                         </span>
-                      </motion.div>
+                      </motion.button>
                     );
                   })
                 )}
               </div>
             </div>
           ) : (
-            <p className="p-4 text-center text-xs text-pm-light-textMuted dark:text-pm-dark-textMuted">{t.selectCollectionPrompt}</p>
+            <div className="p-5 text-center text-xs text-pm-light-textMuted dark:text-pm-dark-textMuted space-y-3">
+              <Folder className="mx-auto h-7 w-7 opacity-40" />
+              <p>{t.selectCollectionPrompt}</p>
+              <button className="rounded border border-pm-orange/40 px-3 py-1.5 font-semibold text-pm-orange hover:bg-pm-orange/10" onClick={onOpenCreateModal}>{t.createSuiteTitle}</button>
+            </div>
           )}
         </div>
 
@@ -593,7 +568,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
 
 
       {/* ── COLUNA PRINCIPAL: REQUEST WORKBENCH & RESPONSE PANE ── */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden">
         
         {/* 1. Request Address Bar & Send Button */}
         <div className="p-3 border-b border-pm-light-border dark:border-pm-dark-border bg-pm-light-surface dark:bg-pm-dark-surface flex items-center gap-2">
@@ -606,14 +581,16 @@ export const Workstation: React.FC<WorkstationProps> = ({
 
               {/* URL Address Bar com variável {{BASE_URL}} e disparo via Enter */}
               <div 
-                className="flex-1 flex items-center bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border rounded px-3 py-1.5 text-xs font-mono overflow-hidden relative group cursor-text"
+                className="flex-1 min-w-0 flex items-center bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border rounded px-3 py-1.5 text-xs font-mono overflow-hidden relative group cursor-text"
                 onClick={() => setShowResolvedUrl(!showResolvedUrl)}
                 title={t.clickToToggleUrl}
               >
-                <span className="text-pm-orange font-bold mr-1 select-none">
+                {!/^https?:\/\//i.test(currentCase.path) && <span className="text-pm-orange font-bold mr-1 truncate shrink-0 max-w-[45%] select-none">
                   {showResolvedUrl ? effectiveBaseUrl.replace(/\/+$/, '') : '{{BASE_URL}}'}
-                </span>
+                </span>}
                 <input
+                  aria-label="URL da requisição"
+                  title={requestUrl}
                   type="text"
                   readOnly
                   value={currentCase.path}
@@ -623,7 +600,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
                       handleSendSingle();
                     }
                   }}
-                  className="bg-transparent text-pm-light-text dark:text-pm-dark-text font-semibold flex-1 focus:outline-none cursor-pointer"
+                  className="bg-transparent text-pm-light-text dark:text-pm-dark-text font-semibold flex-1 min-w-0 focus:outline-none cursor-pointer"
                 />
                 <span className="text-[10px] text-pm-light-textMuted dark:text-pm-dark-textMuted font-mono hidden md:inline ml-2 opacity-50">
                   {t.enterToSendHint}
@@ -635,45 +612,61 @@ export const Workstation: React.FC<WorkstationProps> = ({
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 onClick={handleSendSingle}
-                disabled={isSendingSingle || isExecuting}
+                disabled={isExecuting}
+                aria-label={isSendingSingle ? 'Cancelar espera da requisição' : t.sendBtn}
                 className="px-4 py-1.5 bg-pm-orange hover:bg-pm-orangeHover disabled:opacity-50 text-white font-semibold rounded text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer font-sans"
               >
                 <Send className={`w-3.5 h-3.5 ${isSendingSingle ? 'animate-spin' : ''}`} />
-                <span>{isSendingSingle ? t.sendingBtn : t.sendBtn}</span>
+                <span>{isSendingSingle ? 'Cancelar' : t.sendBtn}</span>
               </motion.button>
             </>
           ) : (
-            <span className="text-xs text-pm-light-textMuted dark:text-pm-dark-textMuted">{t.noRequestSelected}</span>
+            <div className="flex min-w-0 flex-wrap items-center gap-3 text-xs">
+              <span className="text-pm-light-textMuted dark:text-pm-dark-textMuted">{t.noRequestSelected}</span>
+              <button className="font-semibold text-pm-orange hover:underline" onClick={selectedSuite ? onOpenCreateEndpointModal : onOpenCreateModal}>{selectedSuite ? t.createEndpointTitle : t.createSuiteTitle}</button>
+            </div>
           )}
         </div>
 
         {/* 2. Base URL Config & Environment Indicator Bar */}
         {selectedSuite && (
-          <div className="px-3 py-1.5 bg-pm-light-panel dark:bg-pm-dark-panel border-b border-pm-light-border dark:border-pm-dark-border flex items-center justify-between text-[11px] font-mono">
-            <div className="flex items-center gap-2">
+          <div className="px-3 py-1.5 bg-pm-light-panel dark:bg-pm-dark-panel border-b border-pm-light-border dark:border-pm-dark-border flex flex-wrap gap-2 items-center justify-between text-[11px] font-mono">
+            <div className="flex min-w-0 items-center gap-2">
               <span className="text-pm-light-textMuted dark:text-pm-dark-textMuted font-bold">{t.activeEnvLabel}:</span>
               <span className="px-1.5 py-0.5 rounded bg-pm-orange/15 text-pm-orange font-bold text-[10px] border border-pm-orange/30">
                 {activeEnvConfig.name}
               </span>
               <span className="text-pm-light-textMuted dark:text-pm-dark-textMuted">❯</span>
-              <span className="text-pm-light-text dark:text-pm-dark-text truncate max-w-sm">
-                {effectiveBaseUrl}
-              </span>
+              {isEditingUrl ? (
+                <form className="flex min-w-0 flex-wrap items-center gap-2" onSubmit={event => { event.preventDefault(); void handleSaveBaseUrl(); }}>
+                  <input type="url" autoFocus required aria-label="Base URL da coleção" value={editedUrl} disabled={isSavingUrl} onChange={event => setEditedUrl(event.target.value)} className="min-w-0 w-52 rounded border border-pm-light-border dark:border-pm-dark-border bg-pm-light-bg dark:bg-pm-dark-bg px-2 py-1 text-xs" />
+                  <button disabled={isSavingUrl} className="font-semibold text-pm-orange" type="submit">{isSavingUrl ? 'Salvando...' : 'Salvar'}</button>
+                  <button disabled={isSavingUrl} type="button" onClick={() => setIsEditingUrl(false)}>Cancelar</button>
+                  {urlError && <p role="alert" className="w-full text-rose-500">{urlError}</p>}
+                </form>
+              ) : (
+                <>
+                  <span title={effectiveBaseUrl} className="text-pm-light-text dark:text-pm-dark-text truncate max-w-[40vw] select-text">{effectiveBaseUrl}</span>
+                  {environment === 'production' && onUpdateBaseUrl && <button title="Editar Base URL da coleção" aria-label="Editar Base URL da coleção" className="text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-orange" onClick={() => { setEditedUrl(selectedSuite.baseUrl); setUrlError(null); setIsEditingUrl(true); }}><Edit3 className="h-3.5 w-3.5" /></button>}
+                </>
+              )}
             </div>
 
-            <div className="flex items-center gap-3 text-pm-light-textMuted dark:text-pm-dark-textMuted">
-              <span>{t.expectedStatusLabel}: <strong className="text-emerald-500 font-bold">{currentCase?.expectedStatus || 200} OK</strong></span>
+            <div className="flex flex-wrap items-center gap-3 text-pm-light-textMuted dark:text-pm-dark-textMuted">
+              <span>{t.expectedStatusLabel}: <strong className="text-emerald-500 font-bold">{currentCase?.expectedStatus || '—'}</strong></span>
               <span>•</span>
               <span>{t.slaTargetLabel}: <strong className="text-pm-orange">{currentCase?.maxLatencyMs || 250}ms</strong></span>
             </div>
           </div>
         )}
 
+        {currentCase && /^https?:\/\//i.test(currentCase.path) && <p className="shrink-0 border-b border-pm-light-border dark:border-pm-dark-border px-3 py-1 text-[10px] text-pm-light-textMuted dark:text-pm-dark-textMuted">URL absoluta: este endpoint mantém o próprio destino ao alternar o ambiente.</p>}
+
         {/* 3. Request Settings Tabs com layoutId Indicador Fluido */}
-        <div className="border-b border-pm-light-border dark:border-pm-dark-border bg-pm-light-surface dark:bg-pm-dark-surface px-3 flex items-center gap-1 text-xs relative">
+        <div className="overflow-x-auto shrink-0 border-b border-pm-light-border dark:border-pm-dark-border bg-pm-light-surface dark:bg-pm-dark-surface px-3 flex items-center gap-1 text-xs relative">
           {[
             { id: 'assertions', label: t.tabAssertions, count: 2 },
-            { id: 'headers', label: t.tabHeaders, count: 3 },
+            { id: 'headers', label: t.tabHeaders, count: Object.keys(requestHeaders).length },
             { id: 'body', label: t.tabBody, count: currentCase?.body ? 1 : 0 },
             { id: 'schema', label: t.tabSchema, count: currentCase?.expectedSchema ? 1 : 0 },
           ].map((tab) => (
@@ -706,7 +699,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
         </div>
 
         {/* 4. Request Configuration Viewport */}
-        <div className="h-40 p-3 bg-pm-light-bg dark:bg-pm-dark-bg border-b border-pm-light-border dark:border-pm-dark-border overflow-y-auto text-xs font-mono">
+        <div className="h-32 md:h-40 shrink-0 p-3 bg-pm-light-bg dark:bg-pm-dark-bg border-b border-pm-light-border dark:border-pm-dark-border overflow-y-auto text-xs font-mono">
           <AnimatePresence mode="wait">
             {activeRequestTab === 'assertions' && (
               <motion.div
@@ -748,18 +741,12 @@ export const Workstation: React.FC<WorkstationProps> = ({
                   <span className="col-span-5">KEY</span>
                   <span className="col-span-7">VALUE</span>
                 </div>
-                <div className="grid grid-cols-12 gap-2 text-[11px]">
-                  <span className="col-span-5 text-pm-orange font-semibold">Content-Type</span>
-                  <span className="col-span-7 text-pm-light-text dark:text-pm-dark-text">application/json</span>
-                </div>
-                <div className="grid grid-cols-12 gap-2 text-[11px]">
-                  <span className="col-span-5 text-pm-orange font-semibold">Accept</span>
-                  <span className="col-span-7 text-pm-light-text dark:text-pm-dark-text">application/json</span>
-                </div>
-                <div className="grid grid-cols-12 gap-2 text-[11px]">
-                  <span className="col-span-5 text-pm-orange font-semibold">Authorization</span>
-                  <span className="col-span-7 text-emerald-500 font-semibold">Bearer &lt;dynamic_jwt_session&gt;</span>
-                </div>
+                {Object.entries(requestHeaders).map(([key, value]) => (
+                  <div key={key} className="grid grid-cols-12 gap-2 text-[11px]">
+                    <span className="col-span-5 text-pm-orange font-semibold break-all">{key}</span>
+                    <span className="col-span-7 text-pm-light-text dark:text-pm-dark-text break-all select-text">{value}</span>
+                  </div>
+                ))}
               </motion.div>
             )}
 
@@ -773,7 +760,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
               >
                 {currentCase?.body ? (
                   <div className="p-2 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border overflow-hidden">
-                    <JsonSyntaxView data={JSON.parse(currentCase.body)} raw={currentCase.body} />
+                    <JsonSyntaxView data={parseJsonOrText(currentCase.body)} raw={currentCase.body} />
                   </div>
                 ) : (
                   <p className="text-pm-light-textMuted dark:text-pm-dark-textMuted py-4 text-center">{t.noBodyConfigured}</p>
@@ -806,10 +793,10 @@ export const Workstation: React.FC<WorkstationProps> = ({
         <div className="flex-1 flex flex-col min-h-0 bg-pm-light-surface dark:bg-pm-dark-surface">
           
           {/* Response Pane Header Bar */}
-          <div className="h-10 bg-pm-light-sidebar dark:bg-pm-dark-sidebar border-b border-pm-light-border dark:border-pm-dark-border px-3 flex items-center justify-between text-xs shrink-0">
+          <div className="min-h-10 py-2 gap-2 flex-wrap bg-pm-light-sidebar dark:bg-pm-dark-sidebar border-b border-pm-light-border dark:border-pm-dark-border px-3 flex items-center justify-between text-xs shrink-0">
             
             {/* Left: Mode Switcher & Tabs */}
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               
               {/* Selector de Modo com Pílula Animada */}
               <div className="flex items-center bg-pm-light-bg dark:bg-pm-dark-bg p-0.5 rounded border border-pm-light-border dark:border-pm-dark-border relative">
@@ -906,7 +893,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
             </div>
 
             {/* Right: Metrics Pills & Export SLA Report Button */}
-            <div className="flex items-center gap-2 text-[11px] font-mono">
+            <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono">
               
               {/* Status Pills */}
               {responseMode === 'single' && singleResponse ? (
@@ -949,6 +936,8 @@ export const Workstation: React.FC<WorkstationProps> = ({
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
                   onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
+                  disabled={!(responseMode === 'single' ? singleResponse : latestRun)}
+                  aria-expanded={isExportMenuOpen}
                   title="Exportar Relatório Técnico de Conformidade SLA"
                   className="px-2.5 py-1 rounded bg-pm-light-panel dark:bg-pm-dark-panel hover:bg-pm-orange/15 border border-pm-light-border dark:border-pm-dark-border hover:border-pm-orange/50 text-pm-light-text dark:text-pm-dark-text transition-colors flex items-center gap-1.5 font-sans text-xs font-semibold cursor-pointer"
                 >
@@ -1004,8 +993,14 @@ export const Workstation: React.FC<WorkstationProps> = ({
                       <div className="inline-block w-5 h-5 rounded-full border-2 border-pm-orange border-t-transparent animate-spin" />
                       <p className="text-pm-orange font-bold text-sm">Disparando requisição individual...</p>
                       <p className="text-[11px] text-pm-light-textMuted dark:text-pm-dark-textMuted">
-                        Target: {effectiveBaseUrl}{currentCase?.path}
+                        Target: {requestUrl}
                       </p>
+                    </div>
+                  ) : requestError ? (
+                    <div role="alert" className="my-4 rounded border border-rose-500/30 bg-rose-500/10 p-4 text-rose-600 dark:text-rose-300">
+                      <p className="font-semibold">Falha ao obter a resposta</p>
+                      <p className="mt-1 text-xs">{requestError}</p>
+                      <button className="mt-3 font-semibold underline" onClick={() => void handleSendSingle()}>Tentar novamente</button>
                     </div>
                   ) : !singleResponse ? (
                     <div className="py-14 text-center text-pm-light-textMuted dark:text-pm-dark-textMuted space-y-2">
@@ -1015,6 +1010,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
                     </div>
                   ) : (
                     <>
+                      {singleResponse.errorMessage && <p role="alert" className="mb-3 rounded border border-rose-500/30 bg-rose-500/10 p-3 text-rose-600 dark:text-rose-300">{singleResponse.errorMessage}</p>}
                       {/* Tab 1: Pretty Body (JSON) com Syntax Highlighting */}
                       {activeSingleTab === 'body' && (
                         <div className="h-full flex flex-col rounded bg-pm-light-panel dark:bg-[#151515] border border-pm-light-border dark:border-pm-dark-border overflow-hidden shadow-inner">
@@ -1024,7 +1020,7 @@ export const Workstation: React.FC<WorkstationProps> = ({
                               RESPONSE PAYLOAD (JSON PRETTY)
                             </span>
                             <button
-                              onClick={() => handleCopy(JSON.stringify(singleResponse.responseBody, null, 2), 'JSON Payload')}
+                              onClick={() => handleCopy(typeof singleResponse.responseBody === 'object' ? JSON.stringify(singleResponse.responseBody, null, 2) : singleResponse.rawBody, 'JSON Payload')}
                               className="flex items-center gap-1 text-[11px] text-pm-orange hover:underline cursor-pointer font-bold px-2 py-0.5 rounded hover:bg-pm-orange/10 transition-colors"
                             >
                               {copied ? <CheckCheck className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
@@ -1056,10 +1052,10 @@ export const Workstation: React.FC<WorkstationProps> = ({
                                 </span>
                               )}
                               <span className="font-semibold text-pm-light-text dark:text-pm-dark-text">
-                                Status code is {singleResponse.expectedStatus} OK
+                                Status code is {singleResponse.expectedStatus}
                               </span>
                             </div>
-                            <span className="font-mono text-emerald-500 font-bold">{singleResponse.actualStatus} HTTP</span>
+                            <span className={`font-mono font-bold ${singleResponse.statusMatch ? 'text-emerald-500' : 'text-rose-500'}`}>{singleResponse.actualStatus || 'ERROR'} HTTP</span>
                           </motion.div>
 
                           <motion.div 
@@ -1074,15 +1070,15 @@ export const Workstation: React.FC<WorkstationProps> = ({
                                   <CheckCircle2 className="w-3 h-3" /> PASS
                                 </span>
                               ) : (
-                                <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-500 border border-amber-500/30 text-[10px] font-bold flex items-center gap-1">
-                                  <AlertTriangle className="w-3 h-3" /> WARN
+                                <span className="px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-500 border border-rose-500/30 text-[10px] font-bold flex items-center gap-1">
+                                  <XCircle className="w-3 h-3" /> FAIL
                                 </span>
                               )}
                               <span className="font-semibold text-pm-light-text dark:text-pm-dark-text">
                                 Response time is within SLA threshold ({singleResponse.maxLatencyMs}ms)
                               </span>
                             </div>
-                            <span className="font-mono text-pm-orange font-bold">{singleResponse.latencyMs}ms</span>
+                            <span className={`font-mono font-bold ${singleResponse.slaPassed ? 'text-pm-orange' : 'text-rose-500'}`}>{singleResponse.latencyMs}ms</span>
                           </motion.div>
 
                           <motion.div 
@@ -1092,7 +1088,9 @@ export const Workstation: React.FC<WorkstationProps> = ({
                             className="p-3 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border flex items-center justify-between"
                           >
                             <div className="flex items-center gap-2">
-                              {singleResponse.schemaValid ? (
+                              {!currentCase?.expectedSchema ? (
+                                <span className="px-1.5 py-0.5 rounded bg-pm-light-bg dark:bg-pm-dark-bg text-pm-light-textMuted dark:text-pm-dark-textMuted border border-pm-light-border dark:border-pm-dark-border text-[10px] font-bold">SKIP</span>
+                              ) : singleResponse.schemaValid ? (
                                 <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 text-[10px] font-bold flex items-center gap-1">
                                   <CheckCircle2 className="w-3 h-3" /> PASS
                                 </span>
@@ -1105,7 +1103,9 @@ export const Workstation: React.FC<WorkstationProps> = ({
                                 Contract schema integrity verification
                               </span>
                             </div>
-                            <span className="font-mono text-emerald-500 font-bold">[SCHEMA_VALID]</span>
+                            <span className={`font-mono font-bold ${!currentCase?.expectedSchema ? 'text-pm-light-textMuted dark:text-pm-dark-textMuted' : singleResponse.schemaValid ? 'text-emerald-500' : 'text-rose-500'}`}>
+                              {!currentCase?.expectedSchema ? (language === 'pt' ? 'Não configurado' : 'Not configured') : singleResponse.schemaValid ? '[SCHEMA_VALID]' : '[SCHEMA_INVALID]'}
+                            </span>
                           </motion.div>
                         </div>
                       )}
@@ -1184,12 +1184,12 @@ export const Workstation: React.FC<WorkstationProps> = ({
                           animate="visible"
                           variants={{
                             hidden: { opacity: 0 },
-                            visible: { opacity: 1, transition: { staggerChildren: 0.04 } }
+                            visible: { opacity: 1, transition: { staggerChildren: 0.01 } }
                           }}
                           className="space-y-1.5 leading-relaxed"
                         >
                           <p className="text-pm-light-textMuted dark:text-slate-500">
-                            [{new Date(latestRun.createdAt).toLocaleTimeString('pt-BR')}] ❯ RUNNING: "{latestRun.suite?.name}" ({latestRun.totalTests} requests)
+                            [{new Date(latestRun.createdAt).toLocaleTimeString('pt-BR')}] ❯ {latestRun.status}: "{latestRun.suite?.name}" ({latestRun.totalTests} requests)
                           </p>
 
                           {latestRun.assertions?.map((ast, idx) => (
@@ -1199,10 +1199,10 @@ export const Workstation: React.FC<WorkstationProps> = ({
                                 hidden: { opacity: 0, x: -6, y: 3 },
                                 visible: { opacity: 1, x: 0, y: 0, transition: { duration: 0.18 } }
                               }}
-                              className="flex items-start gap-2 text-[11px]"
+                              className="flex flex-wrap items-start gap-2 text-[11px]"
                             >
                               <span className="text-pm-light-textMuted dark:text-slate-600 w-4 text-right">{idx + 1}.</span>
-                              {ast.statusMatch ? (
+                              {assertionPassed(ast) ? (
                                 <span className="text-emerald-500 font-bold">PASS ✔</span>
                               ) : (
                                 <span className="text-rose-500 font-bold">FAIL ✖</span>
@@ -1222,15 +1222,13 @@ export const Workstation: React.FC<WorkstationProps> = ({
                                 {ast.latencyMs}ms
                               </span>
                               
-                              {ast.schemaValid && (
-                                <span className="text-emerald-500/80 text-[10px]">[SCHEMA_VALID]</span>
-                              )}
+                              {!ast.schemaValid && <span className="text-rose-500 text-[10px]">[SCHEMA_INVALID]</span>}
                             </motion.div>
                           ))}
 
                           <div className="pt-2 mt-2 border-t border-pm-light-border dark:border-white/[0.08] text-[11px] space-y-0.5">
                             <p>
-                              ── RESULT: <strong className="text-emerald-500">{latestRun.passedTests}/{latestRun.totalTests} PASSED</strong> • Success Rate: <strong className="text-pm-orange">{latestRun.successRate}%</strong>
+                              ── RESULT: <strong className={latestRun.status === 'PASSED' ? 'text-emerald-500' : 'text-rose-500'}>{latestRun.passedTests}/{latestRun.totalTests} PASSED</strong> • Success Rate: <strong className="text-pm-orange">{latestRun.successRate}%</strong>
                             </p>
                             <p className="text-pm-light-textMuted dark:text-slate-400">
                               ── LATENCY: p95 = <strong className="text-pm-orange">{latestRun.p95LatencyMs}ms</strong> • Total Duration: {latestRun.totalDurationMs}ms
@@ -1246,10 +1244,10 @@ export const Workstation: React.FC<WorkstationProps> = ({
                       {latestRun?.assertions?.map((ast) => (
                         <div
                           key={ast.id}
-                          className="p-2.5 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border flex items-center justify-between text-xs"
+                          className="p-2.5 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border flex flex-wrap gap-2 items-center justify-between text-xs"
                         >
-                          <div className="flex items-center gap-2">
-                            {ast.statusMatch ? (
+                          <div className="flex flex-wrap items-center gap-2">
+                            {assertionPassed(ast) ? (
                               <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-500 text-[10px] font-bold border border-emerald-500/30">PASS</span>
                             ) : (
                               <span className="px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-500 text-[10px] font-bold border border-rose-500/30">FAIL</span>
@@ -1260,9 +1258,11 @@ export const Workstation: React.FC<WorkstationProps> = ({
                           </div>
 
                           <div className="flex items-center gap-3 font-mono text-[11px]">
-                            <span className="text-emerald-500 font-bold">{ast.actualStatus} HTTP</span>
-                            <span className="text-pm-orange">{ast.latencyMs}ms</span>
+                            <span className={ast.statusMatch ? 'text-emerald-500 font-bold' : 'text-rose-500 font-bold'}>{ast.actualStatus || 'ERROR'} HTTP</span>
+                            <span className={ast.slaPassed ? 'text-pm-orange' : 'text-rose-500'}>{ast.latencyMs}ms</span>
+                            {!ast.schemaValid && <span className="text-rose-500">Schema FAIL</span>}
                           </div>
+                          {ast.errorMessage && <p className="w-full text-[11px] text-rose-600 dark:text-rose-300 select-text">{ast.errorMessage}</p>}
                         </div>
                       ))}
                     </div>

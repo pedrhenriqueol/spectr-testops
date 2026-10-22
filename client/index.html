@@ -3,7 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#090A0F" />
+    <meta name="theme-color" content="#1C1C1C" />
+    <script>
+      (() => {
+        let saved;
+        try { saved = localStorage.getItem('spectr_theme'); } catch {}
+        const theme = saved === 'light' || saved === 'dark'
+          ? saved
+          : window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+        document.documentElement.classList.toggle('dark', theme === 'dark');
+        document.documentElement.classList.toggle('light', theme === 'light');
+        document.documentElement.style.colorScheme = theme;
+        document.querySelector('meta[name="theme-color"]').content = theme === 'dark' ? '#1C1C1C' : '#FFFFFF';
+      })();
+    </script>
     <meta name="description" content="Spectr TestOps — Plataforma Corporativa de TestOps, Engenharia de Resiliência e Automação de APIs." />
     
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
@@ -16,7 +29,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   </head>
-  <body class="bg-[#090A0F] text-slate-100 font-sans antialiased selection:bg-purple-600/30 selection:text-purple-200">
+  <body class="bg-pm-light-bg dark:bg-pm-dark-bg text-pm-light-text dark:text-pm-dark-text font-sans antialiased selection:bg-pm-orange/30">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
