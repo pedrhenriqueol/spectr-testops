@@ -3,9 +3,9 @@ import { z } from 'zod';
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-  PORT: z.coerce.number().default(3335),
+  PORT: z.coerce.number().int().min(1).max(65535).default(3335),
   DATABASE_URL: z.string().default('file:./dev.db'),
-  CLIENT_URL: z.string().default('http://localhost:5173')
+  CLIENT_URL: z.string().url().default('http://localhost:5173')
 });
 
 let parsedEnv: z.infer<typeof envSchema>;

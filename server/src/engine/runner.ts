@@ -1,133 +1,9 @@
+import type { TestCase, TestSuite } from '@prisma/client';
 import { prisma } from '../shared/prisma.js';
+import { AppError } from '../shared/errors/AppError.js';
 
-export interface LatencyMetrics {
-  p50: number;
-  p90: number;
-  p95: number;
-  p99: number;
-  min: number;
-  max: number;
-  avg: number;
-}
-
-/**
- * Cálculo estatístico determinístico de percentis de latência (p50, p90, p95, p99)
- * Utiliza o método Nearest Rank padronizado (NIST / Datadog / K6).
- */
-export function calculatePercentiles(latencies: number[]): LatencyMetrics {
-  if (!latencies || latencies.length === 0) {
-    return { p50: 0, p90: 0, p95: 0, p99: 0, min: 0, max: 0, avg: 0 };
-  }
-
-  const sorted = [...latencies].sort((a, b) => a - b);
-  const n = sorted.length;
-
-  const getRankValue = (percentile: number) => {
-    const rank = Math.ceil((percentile / 100) * n) - 1;
-    return sorted[Math.max(0, Math.min(n - 1, rank))];
-  };
-
-  const sum = sorted.reduce((acc, val) => acc + val, 0);
-
-  return {
-    p50: getRankValue(50),
-    p90: getRankValue(90),
-    p95: getRankValue(95),
-    p99: getRankValue(99),
-    min: sorted[0],
-    max: sorted[n - 1],
-    avg: Math.round(sum / n)
-  };
-}
-
-export interface ContractValidationResult {
-  valid: boolean;
-  errorMessage: string | null;
-}
-
-/**
- * Validador recursivo de conformidade OpenAPI / JSON Schema.
- * Suporta objetos aninhados, arrays tipados, validação de tipos primitivos e campos obrigatórios.
- */
-export function validateContractSchema(data: any, schema: any, path = 'root'): ContractValidationResult {
-  if (!schema || typeof schema !== 'object') {
-    return { valid: true, errorMessage: null };
-  }
-
-  // 1. Validação de tipo de dado
-  if (schema.type) {
-    const expectedType = schema.type;
-    const actualType = Array.isArray(data) ? 'array' : data === null ? 'null' : typeof data;
-
-    if (expectedType === 'integer') {
-      if (typeof data !== 'number' || !Number.isInteger(data)) {
-        return {
-          valid: false,
-          errorMessage: `Falha de contrato em '${path}': esperado 'integer', recebido '${actualType}' (${data}).`
-        };
-      }
-    } else if (expectedType === 'number') {
-      if (typeof data !== 'number' || isNaN(data)) {
-        return {
-          valid: false,
-          errorMessage: `Falha de contrato em '${path}': esperado 'number', recebido '${actualType}'.`
-        };
-      }
-    } else if (expectedType !== actualType) {
-      return {
-        valid: false,
-        errorMessage: `Falha de contrato em '${path}': esperado '${expectedType}', recebido '${actualType}'.`
-      };
-    }
-  }
-
-  // 2. Validação de campos obrigatórios (required)
-  if (schema.required && Array.isArray(schema.required)) {
-    if (typeof data !== 'object' || data === null) {
-      return {
-        valid: false,
-        errorMessage: `Falha de contrato em '${path}': esperado objeto para verificar campos obrigatórios.`
-      };
-    }
-
-    for (const field of schema.required) {
-      if (data[field] === undefined) {
-        return {
-          valid: false,
-          errorMessage: `Campo obrigatório ausente no contrato: '${path === 'root' ? field : `${path}.${field}`}'.`
-        };
-      }
-    }
-  }
-
-  // 3. Validação de propriedades aninhadas (properties)
-  if (schema.properties && typeof data === 'object' && data !== null && !Array.isArray(data)) {
-    for (const [propName, propSchema] of Object.entries(schema.properties)) {
-      if (data[propName] !== undefined) {
-        const subResult = validateContractSchema(
-          data[propName],
-          propSchema,
-          path === 'root' ? propName : `${path}.${propName}`
-        );
-        if (!subResult.valid) {
-          return subResult;
-        }
-      }
-    }
-  }
-
-  // 4. Validação de arrays tipados (items)
-  if (schema.items && Array.isArray(data)) {
-    for (let i = 0; i < data.length; i++) {
-      const itemResult = validateContractSchema(data[i], schema.items, `${path}[${i}]`);
-      if (!itemResult.valid) {
-        return itemResult;
-      }
-    }
-  }
-
-  return { valid: true, errorMessage: null };
-}
+import { calculatePercentiles, validateContractSchema } from './contracts.js';
+export { calculatePercentiles, validateContractSchema } from './contracts.js';
 
 export interface RunResult {
   runId: string;
@@ -143,221 +19,87 @@ export interface RunResult {
   successRate: number;
 }
 
-export async function executeTestSuite(suiteId: string, workspaceId: string, triggeredBy = 'MANUAL'): Promise<RunResult> {
+export async function executeTestSuite(
+  suiteId: string,
+  workspaceId: string,
+  triggeredBy = 'MANUAL',
+  baseUrl?: string
+): Promise<RunResult> {
   const suite = await prisma.testSuite.findFirst({
     where: { id: suiteId, workspaceId },
-    include: {
-      cases: {
-        where: { active: true },
-        orderBy: { orderIndex: 'asc' }
-      }
-    }
+    include: { cases: { where: { active: true }, orderBy: { orderIndex: 'asc' } } }
   });
+  if (!suite) throw new AppError('Suíte de testes não encontrada.', 404);
+  if (suite.cases.length === 0) throw new AppError('A suíte não possui casos de teste ativos.', 400);
 
-  if (!suite) {
-    throw new Error('Suíte de testes não encontrada.');
-  }
-
-  // Cria o registro da execução
   const run = await prisma.testRun.create({
-    data: {
-      workspaceId,
-      suiteId,
-      status: 'RUNNING',
-      totalTests: suite.cases.length,
-      triggeredBy
-    }
+    data: { workspaceId, suiteId, status: 'RUNNING', totalTests: suite.cases.length, triggeredBy }
   });
-
   const startTime = Date.now();
   const latencies: number[] = [];
   let passedCount = 0;
   let failedCount = 0;
-
-  // Parse dos headers globais
-  let globalHeaders: Record<string, string> = {};
-  if (suite.headers) {
-    try {
-      globalHeaders = JSON.parse(suite.headers);
-    } catch {
-      globalHeaders = {};
-    }
-  }
-
   let dynamicToken: string | null = null;
 
-  for (const testCase of suite.cases) {
-    const url = testCase.path.startsWith('http://') || testCase.path.startsWith('https://')
-      ? testCase.path
-      : suite.baseUrl.replace(/\/+$/, '') + '/' + testCase.path.replace(/^\/+/, '');
+  try {
+    for (const testCase of suite.cases) {
+      const result = await executeRequest(testCase, suite, dynamicToken, baseUrl);
+      const token = tokenFromBody(result.responseBody);
+      if (result.actualStatus >= 200 && result.actualStatus < 300 && token) dynamicToken = token;
+      latencies.push(result.latencyMs);
+      const passed = result.statusMatch && result.slaPassed && result.schemaValid;
+      if (passed) passedCount++;
+      else failedCount++;
 
-    if (dynamicToken) {
-      globalHeaders['Authorization'] = `Bearer ${dynamicToken}`;
-    }
-    
-    let caseHeaders: Record<string, string> = { ...globalHeaders };
-    if (testCase.headers) {
-      try {
-        caseHeaders = { ...caseHeaders, ...JSON.parse(testCase.headers) };
-      } catch {
-        // ignora
-      }
-    }
-
-    let requestBody: string | undefined = undefined;
-    if (['POST', 'PUT', 'PATCH'].includes(testCase.method.toUpperCase()) && testCase.body) {
-      requestBody = testCase.body;
-      if (!caseHeaders['Content-Type']) {
-        caseHeaders['Content-Type'] = 'application/json';
-      }
-    }
-
-    const testStartTime = Date.now();
-    let actualStatus = 0;
-    let responseBody = '';
-    let errorMessage: string | null = null;
-    let statusMatch = false;
-    let slaPassed = false;
-    let schemaValid = true;
-
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
-
-      const response = await fetch(url, {
-        method: testCase.method.toUpperCase(),
-        headers: caseHeaders,
-        body: requestBody,
-        signal: controller.signal
-      });
-
-      clearTimeout(timeoutId);
-
-      const testDuration = Date.now() - testStartTime;
-      latencies.push(testDuration);
-      actualStatus = response.status;
-      statusMatch = actualStatus === testCase.expectedStatus;
-      slaPassed = testDuration <= testCase.maxLatencyMs;
-
-      try {
-        responseBody = await response.text();
-        if (responseBody) {
-          try {
-            const parsed = JSON.parse(responseBody);
-            if (parsed && typeof parsed === 'object' && parsed.token) {
-              dynamicToken = parsed.token;
-            }
-          } catch {
-            // ignore
-          }
-        }
-      } catch {
-        responseBody = '';
-      }
-
-      // Validação estrita de contrato OpenAPI / JSON Schema
-      if (testCase.expectedSchema && responseBody) {
-        try {
-          const parsed = JSON.parse(responseBody);
-          const schema = JSON.parse(testCase.expectedSchema);
-          const contractRes = validateContractSchema(parsed, schema);
-          if (!contractRes.valid) {
-            schemaValid = false;
-            errorMessage = contractRes.errorMessage;
-          }
-        } catch {
-          schemaValid = false;
-          errorMessage = 'Falha ao validar formato JSON do payload de resposta contra o contrato OpenAPI.';
-        }
-      }
-
-      if (statusMatch && schemaValid) {
-        passedCount++;
-      } else {
-        failedCount++;
-        if (!statusMatch && !errorMessage) {
-          errorMessage = `Status HTTP ${actualStatus} recebido, esperado ${testCase.expectedStatus}.`;
-        }
-      }
-
+      // Persistence errors must not be reclassified as network failures or counted twice.
       await prisma.testAssertion.create({
         data: {
           runId: run.id,
           caseId: testCase.id,
           name: testCase.name,
-          method: testCase.method.toUpperCase(),
+          method: result.method,
           endpoint: testCase.path,
-          actualStatus,
-          expectedStatus: testCase.expectedStatus,
-          statusMatch,
-          latencyMs: testDuration,
-          slaPassed,
-          schemaValid,
-          errorMessage,
-          responseBody: responseBody.slice(0, 1000)
-        }
-      });
-    } catch (err: any) {
-      const testDuration = Date.now() - testStartTime;
-      latencies.push(testDuration);
-      failedCount++;
-      actualStatus = 0;
-      errorMessage = err.name === 'AbortError' ? 'Timeout de rede excedido (15s).' : err.message || 'Falha de conexão.';
-
-      await prisma.testAssertion.create({
-        data: {
-          runId: run.id,
-          caseId: testCase.id,
-          name: testCase.name,
-          method: testCase.method.toUpperCase(),
-          endpoint: testCase.path,
-          actualStatus,
-          expectedStatus: testCase.expectedStatus,
-          statusMatch: false,
-          latencyMs: testDuration,
-          slaPassed: false,
-          schemaValid: false,
-          errorMessage,
-          responseBody: null
+          actualStatus: result.actualStatus,
+          expectedStatus: result.expectedStatus,
+          statusMatch: result.statusMatch,
+          latencyMs: result.latencyMs,
+          slaPassed: result.slaPassed,
+          schemaValid: result.schemaValid,
+          errorMessage: result.errorMessage,
+          responseBody: result.rawBody.slice(0, 1000)
         }
       });
     }
+
+    const totalDurationMs = Date.now() - startTime;
+    const metrics = calculatePercentiles(latencies);
+    const successRate = Number(((passedCount / suite.cases.length) * 100).toFixed(1));
+    const status = failedCount === 0 ? 'PASSED' : 'FAILED';
+    await prisma.testRun.update({
+      where: { id: run.id },
+      data: {
+        status,
+        passedTests: passedCount,
+        failedTests: failedCount,
+        totalDurationMs,
+        p95LatencyMs: metrics.p95,
+        p99LatencyMs: metrics.p99,
+        successRate,
+        completedAt: new Date()
+      }
+    });
+    return {
+      runId: run.id, status, totalTests: suite.cases.length, passedTests: passedCount,
+      failedTests: failedCount, totalDurationMs, p50LatencyMs: metrics.p50,
+      p90LatencyMs: metrics.p90, p95LatencyMs: metrics.p95, p99LatencyMs: metrics.p99, successRate
+    };
+  } catch (error) {
+    await prisma.testRun.update({
+      where: { id: run.id },
+      data: { status: 'FAILED', completedAt: new Date(), totalDurationMs: Date.now() - startTime }
+    });
+    throw error;
   }
-
-  const totalDuration = Date.now() - startTime;
-  const metrics = calculatePercentiles(latencies);
-
-  const totalTests = suite.cases.length;
-  const successRate = totalTests > 0 ? Number(((passedCount / totalTests) * 100).toFixed(1)) : 0;
-  const finalStatus = failedCount === 0 ? 'PASSED' : 'FAILED';
-
-  await prisma.testRun.update({
-    where: { id: run.id },
-    data: {
-      status: finalStatus,
-      passedTests: passedCount,
-      failedTests: failedCount,
-      totalDurationMs: totalDuration,
-      p95LatencyMs: metrics.p95,
-      p99LatencyMs: metrics.p99,
-      successRate,
-      completedAt: new Date()
-    }
-  });
-
-  return {
-    runId: run.id,
-    status: finalStatus,
-    totalTests,
-    passedTests: passedCount,
-    failedTests: failedCount,
-    totalDurationMs: totalDuration,
-    p50LatencyMs: metrics.p50,
-    p90LatencyMs: metrics.p90,
-    p95LatencyMs: metrics.p95,
-    p99LatencyMs: metrics.p99,
-    successRate
-  };
 }
 
 export interface SingleCaseResult {
@@ -374,201 +116,128 @@ export interface SingleCaseResult {
   maxLatencyMs: number;
   schemaValid: boolean;
   responseHeaders: Record<string, string>;
-  responseBody: any;
+  responseBody: unknown;
   rawBody: string;
   responseSize: string;
   errorMessage: string | null;
   timestamp: string;
 }
 
-export async function executeSingleTestCase(caseId: string): Promise<SingleCaseResult> {
-  const testCase = await prisma.testCase.findUnique({
-    where: { id: caseId },
-    include: { suite: true }
-  });
-
-  if (!testCase) {
-    throw new Error('Caso de teste não encontrado.');
+function parseHeaders(value: string | null): Record<string, string> {
+  if (!value) return {};
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
+  } catch {
+    return {};
   }
+}
 
-  const suite = testCase.suite;
-  let globalHeaders: Record<string, string> = {};
-  if (suite.headers) {
+function tokenFromBody(body: unknown): string | null {
+  if (body && typeof body === 'object' && 'token' in body && typeof body.token === 'string') return body.token;
+  return null;
+}
+
+function resolveUrl(testCase: TestCase, suite: TestSuite, baseUrl?: string) {
+  return /^https?:\/\//i.test(testCase.path)
+    ? testCase.path
+    : (baseUrl ?? suite.baseUrl).replace(/\/+$/, '') + '/' + testCase.path.replace(/^\/+/, '');
+}
+
+async function executeRequest(
+  testCase: TestCase,
+  suite: TestSuite,
+  dynamicToken: string | null = null,
+  baseUrl?: string
+): Promise<SingleCaseResult> {
+  const url = resolveUrl(testCase, suite, baseUrl);
+  const startTime = Date.now();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    const headers = new Headers(parseHeaders(suite.headers));
+    if (dynamicToken) headers.set('Authorization', `Bearer ${dynamicToken}`);
+    for (const [name, value] of Object.entries(parseHeaders(testCase.headers))) headers.set(name, value);
+    const method = testCase.method.toUpperCase();
+    const body = !['GET', 'HEAD'].includes(method) ? testCase.body ?? undefined : undefined;
+    if (body !== undefined && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+    const response = await fetch(url, { method, headers, body, signal: controller.signal });
+    // The timeout and SLA include the entire response body, not just its headers.
+    const rawBody = await response.text();
+    const latencyMs = Date.now() - startTime;
+    let responseBody: unknown = rawBody;
+    let validJson = false;
     try {
-      globalHeaders = JSON.parse(suite.headers);
-    } catch {
-      globalHeaders = {};
-    }
-  }
+      responseBody = JSON.parse(rawBody);
+      validJson = true;
+    } catch { /* Plain text responses are allowed unless a JSON contract was configured. */ }
 
+    let schemaValid = true;
+    let errorMessage: string | null = null;
+    if (testCase.expectedSchema !== null) {
+      if (!validJson) {
+        schemaValid = false;
+        errorMessage = 'Falha ao validar formato JSON do payload de resposta contra o contrato OpenAPI.';
+      } else {
+        try {
+          const validation = validateContractSchema(responseBody, JSON.parse(testCase.expectedSchema));
+          schemaValid = validation.valid;
+          errorMessage = validation.errorMessage;
+        } catch {
+          schemaValid = false;
+          errorMessage = 'Schema JSON configurado no teste é inválido.';
+        }
+      }
+    }
+    const statusMatch = response.status === testCase.expectedStatus;
+    const slaPassed = latencyMs <= testCase.maxLatencyMs;
+    if (!errorMessage && !statusMatch) errorMessage = `Status HTTP ${response.status} recebido, esperado ${testCase.expectedStatus}.`;
+    if (!errorMessage && !slaPassed) errorMessage = `SLA excedido: ${latencyMs}ms, limite de ${testCase.maxLatencyMs}ms.`;
+    const responseHeaders: Record<string, string> = {};
+    response.headers.forEach((value, name) => { responseHeaders[name] = value; });
+    const sizeBytes = new TextEncoder().encode(rawBody).length;
+    return {
+      caseId: testCase.id, name: testCase.name, method, url,
+      actualStatus: response.status, statusText: response.statusText || (response.ok ? 'OK' : 'Error'),
+      statusMatch, expectedStatus: testCase.expectedStatus, latencyMs, slaPassed,
+      maxLatencyMs: testCase.maxLatencyMs, schemaValid,
+      responseHeaders, responseBody, rawBody,
+      responseSize: sizeBytes > 1024 ? `${(sizeBytes / 1024).toFixed(2)} KB` : `${sizeBytes} B`,
+      errorMessage, timestamp: new Date().toISOString()
+    };
+  } catch (error) {
+    const isTimeout = controller.signal.aborted;
+    const message = isTimeout ? 'Timeout de rede excedido (15s).' : error instanceof Error ? error.message : 'Falha de conexão.';
+    return {
+      caseId: testCase.id, name: testCase.name, method: testCase.method, url,
+      actualStatus: 0, statusText: isTimeout ? 'Network Timeout' : 'Connection Error',
+      statusMatch: false, expectedStatus: testCase.expectedStatus, latencyMs: Date.now() - startTime,
+      slaPassed: false, maxLatencyMs: testCase.maxLatencyMs, schemaValid: false,
+      responseHeaders: {}, responseBody: { error: message }, rawBody: message,
+      responseSize: '0 B', errorMessage: message, timestamp: new Date().toISOString()
+    };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+export async function executeSingleTestCase(caseId: string, baseUrl?: string): Promise<SingleCaseResult> {
+  const testCase = await prisma.testCase.findUnique({ where: { id: caseId }, include: { suite: true } });
+  if (!testCase) throw new AppError('Caso de teste não encontrado.', 404);
+  const suite = testCase.suite;
   let dynamicToken: string | null = null;
   const isAuthCase = testCase.path.includes('/auth/login') || testCase.path.includes('/login');
   if (!isAuthCase) {
     const loginCase = await prisma.testCase.findFirst({
-      where: {
-        suiteId: suite.id,
-        path: { contains: 'login' },
-        method: 'POST'
-      }
+      where: { suiteId: suite.id, path: { contains: 'login' }, method: 'POST', active: true },
+      orderBy: { orderIndex: 'asc' }
     });
-
-    if (loginCase && loginCase.body) {
-      try {
-        const loginUrl = loginCase.path.startsWith('http://') || loginCase.path.startsWith('https://')
-          ? loginCase.path
-          : suite.baseUrl.replace(/\/+$/, '') + '/' + loginCase.path.replace(/^\/+/, '');
-
-        const loginRes = await fetch(loginUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...globalHeaders },
-          body: loginCase.body,
-          signal: AbortSignal.timeout(10000)
-        });
-
-        if (loginRes.ok) {
-          const loginData: any = await loginRes.json();
-          if (loginData && loginData.token) {
-            dynamicToken = loginData.token;
-          }
-        }
-      } catch {
-        // ignora falha de auto-login e prossegue
-      }
+    if (loginCase?.body) {
+      const loginResult = await executeRequest(loginCase, suite, null, baseUrl);
+      if (loginResult.actualStatus >= 200 && loginResult.actualStatus < 300) dynamicToken = tokenFromBody(loginResult.responseBody);
     }
   }
-
-  const url = testCase.path.startsWith('http://') || testCase.path.startsWith('https://')
-    ? testCase.path
-    : suite.baseUrl.replace(/\/+$/, '') + '/' + testCase.path.replace(/^\/+/, '');
-
-  if (dynamicToken) {
-    globalHeaders['Authorization'] = `Bearer ${dynamicToken}`;
-  }
-
-  let caseHeaders: Record<string, string> = { ...globalHeaders };
-  if (testCase.headers) {
-    try {
-      caseHeaders = { ...caseHeaders, ...JSON.parse(testCase.headers) };
-    } catch {
-      // ignora
-    }
-  }
-
-  let requestBody: string | undefined = undefined;
-  if (['POST', 'PUT', 'PATCH'].includes(testCase.method.toUpperCase()) && testCase.body) {
-    requestBody = testCase.body;
-    if (!caseHeaders['Content-Type']) {
-      caseHeaders['Content-Type'] = 'application/json';
-    }
-  }
-
-  const testStartTime = Date.now();
-  let actualStatus = 0;
-  let statusText = '';
-  let responseBodyText = '';
-  let responseHeadersObj: Record<string, string> = {};
-  let errorMessage: string | null = null;
-  let statusMatch = false;
-  let slaPassed = false;
-  let schemaValid = true;
-
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
-
-    const response = await fetch(url, {
-      method: testCase.method.toUpperCase(),
-      headers: caseHeaders,
-      body: requestBody,
-      signal: controller.signal
-    });
-
-    clearTimeout(timeoutId);
-
-    const latencyMs = Date.now() - testStartTime;
-    actualStatus = response.status;
-    statusText = response.statusText || (response.ok ? 'OK' : 'Error');
-    statusMatch = actualStatus === testCase.expectedStatus;
-    slaPassed = latencyMs <= testCase.maxLatencyMs;
-
-    // Headers de resposta
-    response.headers.forEach((val, key) => {
-      responseHeadersObj[key] = val;
-    });
-
-    try {
-      responseBodyText = await response.text();
-    } catch {
-      responseBodyText = '';
-    }
-
-    let parsedBody: any = responseBodyText;
-    try {
-      parsedBody = JSON.parse(responseBodyText);
-    } catch {
-      // não é JSON
-    }
-
-    // Validação estrita de JSON Schema / OpenAPI
-    if (testCase.expectedSchema && parsedBody && typeof parsedBody === 'object') {
-      try {
-        const schema = JSON.parse(testCase.expectedSchema);
-        const contractRes = validateContractSchema(parsedBody, schema);
-        if (!contractRes.valid) {
-          schemaValid = false;
-          errorMessage = contractRes.errorMessage;
-        }
-      } catch {
-        schemaValid = false;
-        errorMessage = 'Schema JSON configurado no teste é inválido.';
-      }
-    }
-
-    const sizeBytes = new TextEncoder().encode(responseBodyText).length;
-    const responseSize = sizeBytes > 1024 ? `${(sizeBytes / 1024).toFixed(2)} KB` : `${sizeBytes} B`;
-
-    return {
-      caseId: testCase.id,
-      name: testCase.name,
-      method: testCase.method,
-      url,
-      actualStatus,
-      statusText,
-      statusMatch,
-      expectedStatus: testCase.expectedStatus,
-      latencyMs,
-      slaPassed,
-      maxLatencyMs: testCase.maxLatencyMs,
-      schemaValid,
-      responseHeaders: responseHeadersObj,
-      responseBody: parsedBody,
-      rawBody: responseBodyText,
-      responseSize,
-      errorMessage,
-      timestamp: new Date().toISOString()
-    };
-  } catch (err: any) {
-    const latencyMs = Date.now() - testStartTime;
-    const isTimeout = err.name === 'AbortError';
-    return {
-      caseId: testCase.id,
-      name: testCase.name,
-      method: testCase.method,
-      url,
-      actualStatus: 0,
-      statusText: isTimeout ? 'Network Timeout' : 'Connection Error',
-      statusMatch: false,
-      expectedStatus: testCase.expectedStatus,
-      latencyMs,
-      slaPassed: false,
-      maxLatencyMs: testCase.maxLatencyMs,
-      schemaValid: false,
-      responseHeaders: {},
-      responseBody: { error: isTimeout ? 'Timeout de rede excedido (15s).' : err.message },
-      rawBody: err.message,
-      responseSize: '0 B',
-      errorMessage: isTimeout ? 'Timeout de rede excedido.' : (err.message || 'Falha de conexão.'),
-      timestamp: new Date().toISOString()
-    };
-  }
+  return executeRequest(testCase, suite, dynamicToken, baseUrl);
 }

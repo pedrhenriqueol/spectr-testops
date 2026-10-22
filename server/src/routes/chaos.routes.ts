@@ -1,23 +1,32 @@
 import { FastifyInstance } from 'fastify';
+import { STATUS_CODES } from 'node:http';
+import { z } from 'zod';
+
+const numericInput = z.union([z.number(), z.string().trim().min(1)]);
+const delaySchema = z.object({ delay: numericInput.pipe(z.coerce.number().int().min(0).max(30000)).optional() });
+const errorSchema = z.object({ code: numericInput.pipe(z.coerce.number().int().min(400).max(599)).default(503) });
 
 export async function chaosRoutes(app: FastifyInstance) {
   // Simula latência/atraso artificial
   app.all('/simulate-delay', async (request, reply) => {
-    const query = request.query as any;
-    const body = request.body as any;
-    const delayMs = Number(query?.delay || body?.delay || 2000);
+    const query = delaySchema.parse(request.query);
+    const body = delaySchema.parse(request.body ?? {});
+    const delayMs = query.delay ?? body.delay ?? 2000;
 
-    // Delay assíncrono blindado contra memory leaks com liberação imediata em caso de cancelamento do socket
+    // Observe a conexão de resposta: o fechamento do request também ocorre ao terminar de ler um POST.
     await new Promise<void>((resolve) => {
-      const timer = setTimeout(() => {
-        resolve();
-      }, Math.min(Math.max(0, delayMs), 30000));
-
-      request.raw.once('close', () => {
+      const finish = () => {
         clearTimeout(timer);
+        reply.raw.off('close', finish);
         resolve();
-      });
+      };
+      const timer = setTimeout(finish, delayMs);
+      reply.raw.once('close', finish);
+
+      if (reply.raw.destroyed) finish();
     });
+
+    if (reply.raw.destroyed) return;
 
     return reply.send({
       simulated: true,
@@ -30,14 +39,13 @@ export async function chaosRoutes(app: FastifyInstance) {
 
   // Simula erro de indisponibilidade
   app.all('/simulate-error', async (request, reply) => {
-    const query = request.query as any;
-    const code = Number(query?.code || 503);
+    const { code } = errorSchema.parse(request.query);
 
     return reply.status(code).send({
       simulated: true,
       type: 'INJECTED_ERROR',
       statusCode: code,
-      error: code === 503 ? 'Service Unavailable' : 'Internal Server Error',
+      error: STATUS_CODES[code] ?? 'Injected Error',
       message: 'Falha simulada injetada pelo motor de Chaos Engineering do Spectr.'
     });
   });

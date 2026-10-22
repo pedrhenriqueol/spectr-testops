@@ -1,180 +1,78 @@
+import 'dotenv/config';
+import { randomUUID } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log('🌱 Semeando suítes de teste do Spectr TestOps...');
-
-  // 1. Workspace
+  // Stable IDs make repeated setup safe. Never delete or overwrite user collections/runs.
   const workspace = await prisma.workspace.upsert({
-    where: { slug: 'enterprise-core' },
+    where: { slug: 'spectr-local-demo' },
+    update: {},
+    create: { name: 'Spectr Local Demo', slug: 'spectr-local-demo', apiKey: `spk_demo_${randomUUID()}` }
+  });
+  const port = Number(process.env.PORT || 3335);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT inválida para seed local.');
+  const baseUrl = `http://localhost:${port}/api/v1`;
+
+  await prisma.testSuite.upsert({
+    where: { id: 'cb28a4f3-6ec9-4adf-8509-1584b90e8e01' },
     update: {},
     create: {
-      name: 'Enterprise QA Workspace',
-      slug: 'enterprise-core',
-      apiKey: 'spk_live_77c8e2b9f3014a5d89'
-    }
-  });
-
-  // Limpa suítes anteriores para recriar de forma limpa
-  await prisma.testSuite.deleteMany({ where: { workspaceId: workspace.id } });
-
-  // 2. SUÍTE 1: PayStream Gateway ── Core Banking & Resilience Suite
-  const paystreamSuite = await prisma.testSuite.create({
-    data: {
+      id: 'cb28a4f3-6ec9-4adf-8509-1584b90e8e01',
       workspaceId: workspace.id,
-      name: 'PayStream Gateway ── Core Banking & Resilience Suite',
-      description: 'Validação de ponta a ponta dos endpoints transacionais do PayStream: healthcheck de liveness, login com JWT, ledger de transações, split de sellers e disparo de webhook assinado HMAC-SHA256.',
-      baseUrl: 'https://paystream-gateway.onrender.com/api/v1',
-      headers: JSON.stringify({
-        'Accept': 'application/json',
-        'X-Client-Auditor': 'Spectr-TestOps-v1'
-      })
+      name: 'Local API — Contract & Echo',
+      description: 'Coleção local determinística para validar o runner, payloads e contratos sem credenciais ou serviços externos.',
+      baseUrl,
+      headers: JSON.stringify({ Accept: 'application/json' }),
+      cases: { create: [
+        {
+          name: 'Gateway Echo Liveness', method: 'GET', path: '/chaos/echo',
+          expectedStatus: 200, maxLatencyMs: 1500, orderIndex: 0,
+          expectedSchema: JSON.stringify({ type: 'object', required: ['method', 'url', 'timestamp'] })
+        },
+        {
+          name: 'JSON Payload Contract', method: 'POST', path: '/chaos/echo',
+          body: JSON.stringify({ transactionId: 'demo-local', amount: 1250, currency: 'BRL' }),
+          expectedStatus: 200, maxLatencyMs: 1500, orderIndex: 1,
+          expectedSchema: JSON.stringify({
+            type: 'object', required: ['body'], properties: {
+              body: { type: 'object', required: ['transactionId', 'amount'], properties: { amount: { type: 'number' } } }
+            }
+          })
+        }
+      ] }
     }
   });
-
-  const paystreamCases = [
-    {
-      name: 'PayStream Gateway Liveness & Healthcheck',
-      method: 'GET',
-      path: 'https://paystream-gateway.onrender.com/health',
-      expectedStatus: 200,
-      maxLatencyMs: 1000,
-      expectedSchema: JSON.stringify({ required: ['status', 'service'] }),
-      orderIndex: 0
-    },
-    {
-      name: 'Merchant Authentication & Token Generation',
-      method: 'POST',
-      path: '/auth/login',
-      body: JSON.stringify({
-        merchantSlug: 'techstore',
-        email: 'admin@techstore.com',
-        password: 'pedrooliveira1227!'
-      }),
-      expectedStatus: 200,
-      maxLatencyMs: 1500,
-      expectedSchema: JSON.stringify({ required: ['token', 'merchant'] }),
-      orderIndex: 1
-    },
-    {
-      name: 'Transactions Ledger & Concurrent TPV Audit',
-      method: 'GET',
-      path: '/transactions',
-      expectedStatus: 200,
-      maxLatencyMs: 1500,
-      orderIndex: 2
-    },
-    {
-      name: 'Split Engine: Sellers & Marketplace Recipients',
-      method: 'GET',
-      path: '/recipients',
-      expectedStatus: 200,
-      maxLatencyMs: 1500,
-      orderIndex: 3
-    },
-    {
-      name: 'Signed HMAC Webhook Ping Verification',
-      method: 'POST',
-      path: '/webhooks/test-ping',
-      body: JSON.stringify({
-        event: 'transaction.paid',
-        amount: 1500.00
-      }),
-      expectedStatus: 200,
-      maxLatencyMs: 1500,
-      orderIndex: 4
-    }
-  ];
-
-  for (const c of paystreamCases) {
-    await prisma.testCase.create({
-      data: {
-        suiteId: paystreamSuite.id,
-        ...c
-      }
-    });
-  }
-
-  // 3. SUÍTE 2: E-Commerce Core & Checkout Resilience Suite (Chaos & Echo Interno)
-  const chaosSuite = await prisma.testSuite.create({
-    data: {
+  await prisma.testSuite.upsert({
+    where: { id: 'cb28a4f3-6ec9-4adf-8509-1584b90e8e02' },
+    update: {},
+    create: {
+      id: 'cb28a4f3-6ec9-4adf-8509-1584b90e8e02',
       workspaceId: workspace.id,
-      name: 'E-Commerce Core & Chaos Resilience Suite',
-      description: 'Bateria interna de simulação de falhas de infraestrutura, injeção de atrasos artificiais e testes de tolerância a instabilidade.',
-      baseUrl: 'http://localhost:3335/api/v1',
-      headers: JSON.stringify({
-        'Authorization': 'Bearer test-token-qa-demo',
-        'X-Client-Id': 'spectr-runner-v1'
-      })
+      name: 'Local Chaos — Resilience Lab',
+      description: 'Atraso e erro esperados são verificáveis localmente. O caso intermitente é opcional e desativado por padrão.',
+      baseUrl,
+      cases: { create: [
+        {
+          name: 'Injected Latency (80ms)', method: 'GET', path: '/chaos/simulate-delay?delay=80',
+          expectedStatus: 200, maxLatencyMs: 1500, orderIndex: 0,
+          expectedSchema: JSON.stringify({ type: 'object', required: ['simulated', 'delayInjectedMs'] })
+        },
+        {
+          name: 'Expected 503 Service Unavailable', method: 'GET', path: '/chaos/simulate-error?code=503',
+          expectedStatus: 503, maxLatencyMs: 1500, orderIndex: 1,
+          expectedSchema: JSON.stringify({ type: 'object', required: ['simulated', 'error'] })
+        },
+        {
+          name: 'Optional Flaky Service (50% Failure)', method: 'GET', path: '/chaos/simulate-flaky',
+          expectedStatus: 200, maxLatencyMs: 1500, orderIndex: 2, active: false
+        }
+      ] }
     }
   });
-
-  const chaosCases = [
-    {
-      name: 'Health Check & Gateway Echo Liveness',
-      method: 'GET',
-      path: '/chaos/echo',
-      expectedStatus: 200,
-      maxLatencyMs: 150,
-      expectedSchema: JSON.stringify({ required: ['method', 'url', 'timestamp'] }),
-      orderIndex: 0
-    },
-    {
-      name: 'Simulação de Latência de Rede (80ms)',
-      method: 'GET',
-      path: '/chaos/simulate-delay?delay=80',
-      expectedStatus: 200,
-      maxLatencyMs: 1500,
-      expectedSchema: JSON.stringify({ required: ['simulated', 'delayInjectedMs'] }),
-      orderIndex: 1
-    },
-    {
-      name: 'Validação de Contrato & Echo Payload',
-      method: 'POST',
-      path: '/chaos/echo',
-      body: JSON.stringify({ transactionId: 'tx_98214', amount: 1250.00, currency: 'BRL' }),
-      expectedStatus: 200,
-      maxLatencyMs: 200,
-      expectedSchema: JSON.stringify({ required: ['method', 'body', 'timestamp'] }),
-      orderIndex: 2
-    },
-    {
-      name: 'Chaos Injection: Injeção de Falha 503 Service Unavailable',
-      method: 'GET',
-      path: '/chaos/simulate-error?code=503',
-      expectedStatus: 503,
-      maxLatencyMs: 200,
-      expectedSchema: JSON.stringify({ required: ['simulated', 'error'] }),
-      orderIndex: 3
-    },
-    {
-      name: 'Chaos Injection: Teste de Resiliência Flaky (50% Drop)',
-      method: 'GET',
-      path: '/chaos/simulate-flaky',
-      expectedStatus: 200,
-      maxLatencyMs: 1500,
-      orderIndex: 4
-    }
-  ];
-
-  for (const c of chaosCases) {
-    await prisma.testCase.create({
-      data: {
-        suiteId: chaosSuite.id,
-        ...c
-      }
-    });
-  }
-
-  console.log('✅ Seed finalizado com sucesso! Suíte do PayStream e Suíte de Caos criadas.');
+  console.log('Seed local concluído. Coleções existentes e histórico preservados.');
 }
 
-main()
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+main().catch((error) => { console.error(error); process.exitCode = 1; })
+  .finally(() => prisma.$disconnect());

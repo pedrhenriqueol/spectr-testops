@@ -10,7 +10,9 @@
     "start": "node dist/server.js",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
-    "seed": "tsx prisma/seed.ts"
+    "seed": "tsx prisma/seed.ts",
+    "test": "node --import tsx test/run-tests.ts",
+    "test:unit": "node --import tsx --test test/contracts.test.ts"
   },
   "dependencies": {
     "@fastify/cors": "^9.0.1",
