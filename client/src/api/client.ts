@@ -1,6 +1,8 @@
 import axios, { InternalAxiosRequestConfig } from 'axios';
 
-const rawBaseURL = import.meta.env.VITE_API_URL || 'http://localhost:3335/api/v1';
+const rawBaseURL = import.meta.env.VITE_API_URL || (import.meta.env.PROD
+  ? 'https://spectr-testops-server.onrender.com/api/v1'
+  : 'http://localhost:3335/api/v1');
 const cleanBase = rawBaseURL.replace(/\/+$/, '');
 export const baseURL = cleanBase.endsWith('/api/v1')
   ? cleanBase
@@ -10,7 +12,7 @@ export const baseURL = cleanBase.endsWith('/api/v1')
 
 export const api = axios.create({
   // The URL used by the execution engine stays absolute; the browser uses a
-  // first-party cookie through Vite/Vercel's proxy unless explicitly opted out.
+  // first-party cookie through Vite's proxy / Vercel's external rewrite.
   baseURL: import.meta.env.VITE_API_TRANSPORT === 'direct' ? baseURL : '/api/v1',
   withCredentials: true,
   headers: {

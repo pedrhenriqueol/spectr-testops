@@ -1,6 +1,14 @@
 {
-  "routes": [
-    { "handle": "filesystem" },
-    { "src": "/(?!api(?:/|$)).*", "dest": "/index.html" }
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
+  "installCommand": "npm ci",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "rewrites": [
+    {
+      "source": "/api/v1/:path*",
+      "destination": "https://spectr-testops-server.onrender.com/api/v1/:path*"
+    },
+    { "source": "/((?!api(?:/|$)).*)", "destination": "/index.html" }
   ]
 }

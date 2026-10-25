@@ -19,7 +19,7 @@ Com `prefers-reduced-motion: reduce`, não há revelação radial nem deslocamen
 ## Validação
 
 - `cd client && npm run build`: TypeScript e build de produção.
-- `cd client && npm test`: 11 regressões do proxy com servidores HTTP locais.
+- `cd client && npm test`: regressões das regras de publicação da raiz e do cliente, compiladas pelo parser oficial da Vercel, incluindo os caminhos de autenticação e a separação do fallback da SPA.
 - `cd client && npx playwright install chromium && npm run test:e2e`: regressões de sessão e animações com respostas de API controladas, sem alterar contas reais. O servidor de teste usa a porta 5183.
 - Para usar Chromium já instalado: `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium npm run test:e2e`.
 - QA adicional no navegador: 8 verificações de formulário com movimento normal; 20 de menus e 9 de tema, incluindo fallback, movimento reduzido, cliques rápidos, foco e mobile; 15 verificações do fluxo completo contra a API local real, com limpeza da conta de teste.

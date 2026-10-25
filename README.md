@@ -45,11 +45,11 @@ Abra a interface, selecione **Criar conta** e cadastre nome, e-mail e uma senha 
 | `server/.env` | `DATABASE_URL` | SQLite: `file:./dev.db`, relativo ao schema Prisma |
 | `server/.env` | `CLIENT_URL` | Origem da interface permitida em CORS e operações de escrita: `http://localhost:5173` |
 | `server/.env` | `NODE_ENV` | `development`, `test` ou `production`; produção exige cookies Secure |
-| `server/.env` | `SESSION_SAME_SITE` | `lax` por padrão; `none` para uma interface hospedada em outro site |
+| `server/.env` | `SESSION_SAME_SITE` | `lax` por padrão; `none` somente quando o navegador chama diretamente uma API em outro site |
 | `server/.env` | `SESSION_SECURE` | `true` ou `false`; padrão `true` em produção e `false` nos demais ambientes |
 | `server/.env` | `TARGET_ALLOWED_HOSTS` | Lista opcional de hostnames exatos separados por vírgula; restringe os destinos de saída |
-| Vite local / função Vercel | `SPECTR_API_URL` | Destino absoluto do proxy; local usa `http://127.0.0.1:3335` por padrão, Vercel exige destino configurado por HTTPS |
-| `client/.env` / Vercel | `VITE_API_URL` | Endereço público do backend para o ambiente Local do executor e destino legado do proxy; aceita URL raiz, `/api` ou `/api/v1` |
+| Vite local | `SPECTR_API_URL` | Destino absoluto do proxy de desenvolvimento; padrão `http://127.0.0.1:3335` |
+| `client/.env` / build | `VITE_API_URL` | Endereço público do backend para o ambiente Local do executor e transporte direto; aceita URL raiz, `/api` ou `/api/v1` |
 | `client/.env` / build | `VITE_API_TRANSPORT` | Proxy pela mesma origem por padrão; `direct` habilita chamadas diretas a `VITE_API_URL` |
 
 `VITE_API_URL` é lida ao iniciar/buildar o cliente. Variáveis e credenciais de execução não devem ser adicionadas a arquivos versionados. O ambiente pode fornecer `HTTP_PROXY`, `HTTPS_PROXY` e `NO_PROXY`; o cliente HTTP do motor respeita essas configurações.
@@ -60,7 +60,9 @@ Se o cache npm padrão não tiver permissão de escrita, use `npm ci --cache /wo
 
 A sessão dura até sete dias e usa o cookie `spectr_session`, com **HttpOnly**, caminho `/api/v1` e **SameSite=Lax** por padrão. O banco armazena o hash do token de sessão; o frontend envia o cookie com `withCredentials` e não o grava em `localStorage`. Logout revoga a sessão atual no servidor.
 
-Na Vercel, mantenha **Root Directory = client** e configure `SPECTR_API_URL` com a URL HTTPS real da API no ambiente de execução. A função em `client/api/v1/[...path].js` preserva o cookie HttpOnly pela origem da interface. O backend usa `CLIENT_URL=https://spectr-testops.vercel.app`, `SESSION_SAME_SITE=lax` e `SESSION_SECURE=true`. O destino legado `VITE_API_URL` absoluto também é aceito pela função. Um novo deploy é necessário após alterar as variáveis.
+Na Vercel, `/api/v1/*` é encaminhado por rewrite para `https://spectr-testops-server.onrender.com/api/v1/*` antes do fallback da aplicação. O cookie HttpOnly permanece na origem da interface. O backend usa `CLIENT_URL=https://spectr-testops.vercel.app`, `SESSION_SAME_SITE=lax` e `SESSION_SECURE=true`. O encaminhamento não depende de função Node ou variável de execução.
+
+Há configurações para as duas opções de **Root Directory**: [vercel.json](vercel.json) na raiz usa `client/dist`; [client/vercel.json](client/vercel.json) usa `dist` quando o projeto publica a pasta `client`. Ambas incluem os comandos de instalação/build e as mesmas regras de API. Publique um novo deploy para aplicar as regras. Se mudar o backend, atualize o destino nas duas configurações; os testes verificam essa correspondência.
 
 Depois de cadastrar ou autenticar, a interface confirma a sessão por `auth/me` antes de abrir o workspace. Se o cookie não funcionar, apresenta um erro sem alternar de tela. Um cadastro já concluído retorna ao formulário de entrada, informando que a conta foi criada.
 
@@ -204,11 +206,16 @@ npm test
 
 cd ../client
 npm run build
+npm test
+npx playwright install chromium
+npm run test:e2e
+# Verificação pública, sem login ou criação de contas; execute após o deploy:
+npm run check:deployment
 ```
 
 `npm test` cria um SQLite temporário exclusivo e executa testes de contratos, percentis, runner HTTP, autenticação, isolamento e rotas. O runner configura seu próprio banco e o remove ao terminar; não usa o banco de desenvolvimento nem o seed, e não cria contas em uma instalação real. Requer os engines Prisma instalados normalmente. O cenário de timeout leva aproximadamente 15 segundos. `test:unit` verifica contratos e percentis sem banco.
 
-O workflow [CI](.github/workflows/ci.yml) contém dois jobs independentes em Node.js 22: backend com `npm ci`, geração Prisma, build e testes; frontend com `npm ci` e build/typecheck. Executa em pushes para `main` e pull requests, com permissões de leitura do repositório. Não depende de secrets nem adiciona uma infraestrutura de browser à CI. O arquivo do workflow define essas verificações; seu resultado no GitHub deve ser consultado na execução correspondente.
+O workflow [CI](.github/workflows/ci.yml) contém dois jobs independentes em Node.js 22: backend com `npm ci`, geração Prisma, build e testes; frontend com build/typecheck, validação das regras de publicação pelo parser oficial da Vercel e regressões de navegador com Chromium. Executa em pushes para `main` e pull requests, sem secrets. Os testes de navegador usam respostas controladas; `check:deployment` é uma verificação pública separada e não integra a CI. O resultado no GitHub deve ser consultado na execução correspondente.
 
 ## Limites atuais
 

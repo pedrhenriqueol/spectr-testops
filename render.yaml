@@ -1,7 +1,7 @@
 # Review/apply this Blueprint in Render; committing it does not migrate an API.
 services:
   - type: web
-    name: spectr-testops-api
+    name: spectr-testops-server
     runtime: node
     rootDir: server
     plan: starter
