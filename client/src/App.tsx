@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { api, getApiErrorMessage } from './api/client';
-import { TestSuite, TestRun } from './types';
+import { TestSuite, TestRun, TestCase } from './types';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { AuthScreen } from './components/AuthScreen';
 import { PostmanTopNav, resolveBaseUrl } from './components/PostmanTopNav';
 import { Workstation } from './components/Workstation';
+import { WorkspaceRail } from './components/WorkspaceRail';
 import { ChaosLab } from './components/ChaosLab';
 import { AuditLedger } from './components/AuditLedger';
 import { CreateSuiteModal } from './components/CreateSuiteModal';
@@ -21,6 +24,7 @@ function MainApp() {
   const [activeView, setActiveView] = useState<'workstation' | 'chaos' | 'history'>('workstation');
   const [environment, setEnvironment] = useState('production');
   const [searchQuery, setSearchQuery] = useState('');
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [isExecuting, setIsExecuting] = useState(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isCreateEndpointModalOpen, setIsCreateEndpointModalOpen] = useState(false);
@@ -91,21 +95,6 @@ function MainApp() {
     }
   };
 
-  const handleRunDemo = async () => {
-    const paystreamSuite = suites.find(s => s.name.includes('PayStream')) || suites[0];
-    if (paystreamSuite) {
-      setSelectedSuite(paystreamSuite);
-      setActiveView('workstation');
-      await handleRunSuite(paystreamSuite.id);
-    } else {
-      showToast({
-        type: 'info',
-        title: 'Nenhuma coleção disponível',
-        message: 'Crie uma coleção e adicione endpoints para executar os testes.'
-      });
-    }
-  };
-
   const handleCreateSuite = async (data: { name: string; description?: string; baseUrl: string }) => {
     try {
       const created = await api.post('/suites', data);
@@ -160,21 +149,32 @@ function MainApp() {
     }
   };
 
+  const handleCaseUpdated = (updated: TestCase) => {
+    const merge = (suite: TestSuite) => suite.id === updated.suiteId ? { ...suite, cases: suite.cases.map(item => item.id === updated.id ? updated : item).sort((a,b) => a.orderIndex - b.orderIndex) } : suite;
+    setSuites(current => current.map(merge));
+    setSelectedSuite(current => current ? merge(current) : current);
+    setLatestRun(null);
+  };
+  const handleCaseDeleted = (caseId: string) => {
+    const remove = (suite: TestSuite) => ({...suite,cases:suite.cases.filter(item=>item.id!==caseId)});
+    setSuites(current => current.map(remove));
+    setSelectedSuite(current => current ? remove(current) : current);
+    setLatestRun(null);
+    void loadData();
+  };
+  const changeView = (view: typeof activeView) => {
+    if (view !== activeView && hasUnsavedChanges && !window.confirm('Descartar as alterações não salvas desta requisição?')) return;
+    setHasUnsavedChanges(false);
+    setActiveView(view);
+  };
+
   return (
     <div className="flex flex-col h-dvh w-full overflow-hidden bg-pm-light-bg dark:bg-pm-dark-bg text-pm-light-text dark:text-pm-dark-text transition-colors duration-200">
       
       {/* 1. Global Postman Topbar */}
       <PostmanTopNav
-        activeView={activeView}
-        setActiveView={setActiveView}
-        selectedSuite={selectedSuite}
-        onRunSuite={() => selectedSuite && handleRunSuite(selectedSuite.id)}
-        isExecuting={isExecuting}
-        onRunDemo={handleRunDemo}
-        environment={environment}
-        setEnvironment={(value) => { setEnvironment(value); setLatestRun(null); }}
         searchQuery={searchQuery}
-        setSearchQuery={setSearchQuery}
+        setSearchQuery={(value) => { setSearchQuery(value); if (value) setActiveView('workstation'); }}
       />
 
       {loadError && (
@@ -188,7 +188,9 @@ function MainApp() {
       {isLoading && !suites.length && !loadError && <div role="status" className="shrink-0 px-4 py-2 text-xs text-pm-orange">Carregando coleções...</div>}
 
       {/* 2. Main Workstation Area com Renderização Direta e Fluid Motion */}
-      <div className="flex-1 min-h-0 flex overflow-hidden relative w-full">
+      <main className="flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row">
+        <WorkspaceRail activeView={activeView} onChangeView={changeView} />
+        <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
         {activeView === 'workstation' && (
           <motion.div
             key="workstation"
@@ -202,6 +204,9 @@ function MainApp() {
               selectedSuite={selectedSuite}
               onSelectSuite={(suite) => { setSelectedSuite(suite); setLatestRun(null); }}
               onRunSuite={handleRunSuite}
+              onCaseUpdated={handleCaseUpdated}
+              onCaseDeleted={handleCaseDeleted}
+              onDirtyChange={setHasUnsavedChanges}
               latestRun={latestRun}
               isExecuting={isExecuting}
               onOpenCreateModal={() => setIsCreateModalOpen(true)}
@@ -210,6 +215,7 @@ function MainApp() {
               searchQuery={searchQuery}
               setSearchQuery={setSearchQuery}
               environment={environment}
+              onEnvironmentChange={(value: string) => { setEnvironment(value); setLatestRun(null); }}
             />
           </motion.div>
         )}
@@ -239,9 +245,9 @@ function MainApp() {
               onSelectRun={async (r) => {
                 try {
                   const runDetail = await api.get('/runs/' + r.id);
-                  setLatestRun(runDetail.data.run);
                   const suite = suites.find(item => item.id === runDetail.data.run.suiteId);
                   if (suite) setSelectedSuite(suite);
+                  setLatestRun(runDetail.data.run);
                   setActiveView('workstation');
                 } catch (error) {
                   showToast({ type: 'error', title: 'Erro ao carregar execução', message: getApiErrorMessage(error) });
@@ -250,7 +256,8 @@ function MainApp() {
             />
           </motion.div>
         )}
-      </div>
+        </div>
+      </main>
 
       {/* Modais */}
       <CreateSuiteModal
@@ -270,13 +277,21 @@ function MainApp() {
   );
 }
 
+function AuthenticatedApp() {
+  const {loading,user,selectedWorkspaceId} = useAuth();
+  const {language} = useLanguage();
+  if (loading) return <div role="status" className="flex h-dvh items-center justify-center bg-pm-light-bg text-sm text-pm-light-textMuted dark:bg-pm-dark-bg dark:text-pm-dark-textMuted">{language === 'pt' ? 'Carregando sessão…' : 'Loading session…'}</div>;
+  if (!user) return <AuthScreen />;
+  return <MainApp key={`${user.id}:${selectedWorkspaceId || ''}`} />;
+}
+
 export function App() {
   return (
     <MotionConfig reducedMotion="user">
     <ThemeProvider>
       <LanguageProvider>
         <ToastProvider>
-          <MainApp />
+          <AuthProvider><AuthenticatedApp /></AuthProvider>
         </ToastProvider>
       </LanguageProvider>
     </ThemeProvider>

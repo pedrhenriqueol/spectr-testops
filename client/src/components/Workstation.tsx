@@ -1,16 +1,15 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { 
-  Plus, Search, Play, CheckCircle2, XCircle, Clock, Shield, 
-  Terminal, Copy, Check, FileJson, Key, Sliders, AlertTriangle, 
-  ChevronRight, ChevronDown, Folder, Code, Send, Sparkles, Layers,
-  ExternalLink, Edit3, Download, FileSpreadsheet, FileCode, CheckCheck, Globe
-} from 'lucide-react';
-import { TestSuite, TestCase, TestRun, HttpMethod, SingleResponse } from '../types';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Edit3, Folder, Play } from 'lucide-react';
+import { TestSuite, TestCase, TestRun, SingleResponse } from '../types';
 import { api, getApiErrorMessage } from '../api/client';
 import { useToast } from '../context/ToastContext';
 import { useLanguage } from '../context/LanguageContext';
 import { ENVIRONMENTS_MAP, resolveBaseUrl } from './PostmanTopNav';
-import { motion, AnimatePresence } from 'framer-motion';
+import { CollectionsSidebar } from './CollectionsSidebar';
+import { RequestPanel } from './RequestPanel';
+import { ResponsePanel } from './ResponsePanel';
+import { ModalShell } from './ModalShell';
+import { getRequestDraftErrors, toRequestOverrides, toRequestPayload } from '../types/request';
 
 interface WorkstationProps {
   suites: TestSuite[];
@@ -23,8 +22,12 @@ interface WorkstationProps {
   onOpenCreateEndpointModal: () => void;
   onUpdateBaseUrl?: (newUrl: string) => Promise<void>;
   searchQuery?: string;
-  setSearchQuery?: (q: string) => void;
+  setSearchQuery?: (query: string) => void;
   environment?: string;
+  onEnvironmentChange: (environment: string) => void;
+  onCaseUpdated: (testCase: TestCase) => void;
+  onCaseDeleted: (caseId: string) => void;
+  onDirtyChange: (dirty: boolean) => void;
 }
 
 function parseJsonOrText(value: string): unknown {
@@ -35,99 +38,20 @@ function assertionPassed(result: { statusMatch: boolean; slaPassed: boolean; sch
   return result.statusMatch && result.slaPassed && result.schemaValid && !result.errorMessage;
 }
 
-// Componente de Syntax Highlighter de JSON customizado e limpo
-const JsonSyntaxView: React.FC<{ data: any; raw: string }> = ({ data, raw }) => {
-  const formatted = useMemo(() => {
-    try {
-      return typeof data === 'object' && data !== null
-        ? JSON.stringify(data, null, 2)
-        : raw;
-    } catch {
-      return raw;
-    }
-  }, [data, raw]);
-
-  const lines = useMemo(() => formatted.split('\n'), [formatted]);
-
-  const highlightLine = (line: string) => {
-    // Regex para identificar chaves, strings, números, booleanos e nulos
-    const parts = line.split(/("(?:\\.|[^"\\])*"|\b(?:true|false|null)\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g);
-    return parts.map((part, index) => {
-      if (/^"/.test(part) && /^\s*:/.test(parts[index + 1] || '')) {
-        return <span key={index} className="text-pm-orange font-semibold">{part}</span>;
-      }
-      if (/^".*?"$/.test(part)) {
-        return <span key={index} className="text-emerald-500 dark:text-emerald-400">{part}</span>;
-      }
-      if (/^\b(?:true|false)\b$/.test(part)) {
-        return <span key={index} className="text-amber-500 font-bold">{part}</span>;
-      }
-      if (/^\bnull\b$/.test(part)) {
-        return <span key={index} className="text-slate-400 italic">{part}</span>;
-      }
-      if (/^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(part)) {
-        return <span key={index} className="text-sky-400 font-mono">{part}</span>;
-      }
-      return <span key={index} className="text-pm-light-text dark:text-slate-300">{part}</span>;
-    });
-  };
-
-  return (
-    <div className="font-mono text-[11px] leading-relaxed select-text overflow-x-auto">
-      {lines.map((line, idx) => (
-        <div key={idx} className="flex hover:bg-black/5 dark:hover:bg-white/[0.04] px-2 py-0.5 rounded">
-          <span className="w-8 shrink-0 text-pm-light-textMuted dark:text-slate-600 select-none text-right pr-3 font-mono text-[10px]">
-            {idx + 1}
-          </span>
-          <span className="whitespace-pre">{highlightLine(line)}</span>
-        </div>
-      ))}
-    </div>
-  );
-};
-
-// Componente para destacar termos pesquisados
-const HighlightText: React.FC<{ text: string; query: string }> = ({ text, query }) => {
-  if (!query.trim()) return <span>{text}</span>;
-  const regex = new RegExp(`(${query.replace(/[-[\]{}()*+?.,\\\^$|#\s]/g, '\\$&')})`, 'gi');
-  const parts = text.split(regex);
-  return (
-    <span>
-      {parts.map((part, i) =>
-        regex.test(part) ? (
-          <mark key={i} className="bg-pm-orange/30 text-pm-orange dark:text-orange-300 font-bold px-0.5 rounded">
-            {part}
-          </mark>
-        ) : (
-          <span key={i}>{part}</span>
-        )
-      )}
-    </span>
-  );
-};
-
-export const Workstation: React.FC<WorkstationProps> = ({
-  suites,
-  selectedSuite,
-  onSelectSuite,
-  onRunSuite,
-  latestRun,
-  isExecuting,
-  onOpenCreateModal,
-  onOpenCreateEndpointModal,
-  onUpdateBaseUrl,
-  searchQuery = '',
-  setSearchQuery,
-  environment = 'production'
-}) => {
+export function Workstation({ suites, selectedSuite, onSelectSuite, onRunSuite, latestRun, isExecuting, onOpenCreateModal, onOpenCreateEndpointModal, onUpdateBaseUrl, searchQuery = '', setSearchQuery, environment = 'production', onEnvironmentChange, onCaseUpdated, onCaseDeleted, onDirtyChange }: WorkstationProps) {
   const { showToast } = useToast();
-  const { t, language } = useLanguage();
+  const { language, t } = useLanguage();
+  const text = (pt: string, en: string) => language === 'pt' ? pt : en;
   const [selectedCase, setSelectedCase] = useState<TestCase | null>(null);
   const [localSearch, setLocalSearch] = useState('');
+  const [draft, setDraft] = useState<TestCase | null>(null);
+  const [sentCase, setSentCase] = useState<TestCase | null>(null);
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [activeRequestTab, setActiveRequestTab] = useState<'assertions' | 'headers' | 'body' | 'schema'>('assertions');
-  
-  // Single Request Runner State
   const [singleResponse, setSingleResponse] = useState<SingleResponse | null>(null);
   const [isSendingSingle, setIsSendingSingle] = useState(false);
   const [requestError, setRequestError] = useState<string | null>(null);
@@ -135,145 +59,172 @@ export const Workstation: React.FC<WorkstationProps> = ({
   const [responseMode, setResponseMode] = useState<'single' | 'collection'>('single');
   const [activeSingleTab, setActiveSingleTab] = useState<'body' | 'tests' | 'headers'>('body');
   const [activeCollectionTab, setActiveCollectionTab] = useState<'cli' | 'breakdown'>('cli');
-
   const [copied, setCopied] = useState(false);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isEditingUrl, setIsEditingUrl] = useState(false);
   const [editedUrl, setEditedUrl] = useState('');
   const [isSavingUrl, setIsSavingUrl] = useState(false);
   const [urlError, setUrlError] = useState<string | null>(null);
-  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
-  const [showResolvedUrl, setShowResolvedUrl] = useState(false);
-  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const settingsRef = useRef<HTMLDivElement>(null);
+  const splitRef = useRef<HTMLDivElement>(null);
+  const collectionsToggleRef = useRef<HTMLButtonElement>(null);
+  const resizingRef = useRef(false);
+  const [requestSize, setRequestSize] = useState(43);
 
-  // Termo de busca unificado
-  const activeQuery = searchQuery || localSearch;
-
-  // Sincroniza caso ativo
   const activeCases = selectedSuite?.cases || [];
-  const currentCase = activeCases.find(item => item.id === selectedCase?.id) || activeCases[0] || null;
-
-  // Determina a Base URL efetiva conforme o Environment selecionado
+  const storedCase = activeCases.find(item => item.id === selectedCase?.id) || activeCases[0] || null;
+  const currentCase = storedCase && draft?.id === storedCase.id ? draft : storedCase;
+  const editableFields: (keyof TestCase)[] = ['name','method','path','headers','body','expectedStatus','maxLatencyMs','expectedSchema','active'];
+  const isDirty = !!(storedCase && currentCase && editableFields.some(key => (storedCase[key] ?? null) !== (currentCase[key] ?? null)));
   const activeEnvConfig = ENVIRONMENTS_MAP[environment] || ENVIRONMENTS_MAP.production;
   const effectiveBaseUrl = resolveBaseUrl(selectedSuite, environment);
+  const visibleRun = latestRun?.suiteId === selectedSuite?.id ? latestRun : null;
   const requestUrl = currentCase?.path.match(/^https?:\/\//i)
     ? currentCase.path
     : `${effectiveBaseUrl.replace(/\/+$/, '')}/${currentCase?.path.replace(/^\/+/, '') || ''}`;
   const requestHeaders = useMemo<Record<string, string>>(() => {
-    const suiteHeaders = selectedSuite?.headers ? parseJsonOrText(selectedSuite.headers) : {};
-    const caseHeaders = currentCase?.headers ? parseJsonOrText(currentCase.headers) : {};
-    return {
-      'Content-Type': 'application/json',
-      ...(typeof suiteHeaders === 'object' && suiteHeaders !== null ? suiteHeaders : {}),
-      ...(typeof caseHeaders === 'object' && caseHeaders !== null ? caseHeaders : {})
-    };
-  }, [selectedSuite?.headers, currentCase?.headers]);
+    const headers = new Headers();
+    if (currentCase?.body) headers.set('Content-Type','application/json');
+    for (const raw of [selectedSuite?.headers, currentCase?.headers]) {
+      if (!raw) continue;
+      try { const value = JSON.parse(raw); if (value && typeof value === 'object' && !Array.isArray(value)) for (const [key,item] of Object.entries(value)) if(typeof item === 'string') headers.set(key,item); } catch { /* Invalid draft stays editable and is validated before Save/Send. */ }
+    }
+    const result: Record<string,string> = {};
+    headers.forEach((value,key)=>{result[key]=value;});
+    return result;
+  }, [selectedSuite?.headers, currentCase?.headers, currentCase?.body]);
 
+  useEffect(() => { setDraft(null); setSaveError(null); setDeleteOpen(false); }, [storedCase?.id]);
+  useEffect(() => { onDirtyChange(isDirty); }, [isDirty,onDirtyChange]);
   useEffect(() => {
-    setIsEditingUrl(false);
-    setUrlError(null);
-  }, [selectedSuite?.id, environment]);
+    if (!isDirty) return;
+    const unload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    const change = (event: Event) => { if (!window.confirm(text('Descartar as alterações não salvas desta requisição?', 'Discard unsaved changes to this request?'))) event.preventDefault(); };
+    window.addEventListener('beforeunload',unload);
+    window.addEventListener('spectr:before-context-change',change);
+    return () => {window.removeEventListener('beforeunload',unload);window.removeEventListener('spectr:before-context-change',change);};
+  },[isDirty,language]);
+  const discardBefore = (action: () => void) => {
+    if (isDirty && !window.confirm(text('Descartar as alterações não salvas desta requisição?', 'Discard unsaved changes to this request?'))) return;
+    setDraft(null); setSaveError(null); action();
+  };
+  const handleSaveDraft = async () => {
+    if (!currentCase || !selectedSuite || isSavingDraft || !isDirty) return;
+    const errors = getRequestDraftErrors(currentCase,language);
+    if (Object.keys(errors).length) { setSaveError(Object.values(errors).join(' ')); return; }
+    setIsSavingDraft(true); setSaveError(null);
+    try {
+      const response = await api.patch<{testCase:TestCase}>(`/suites/${selectedSuite.id}/cases/${currentCase.id}`,toRequestPayload(currentCase));
+      setDraft(response.data.testCase); onCaseUpdated(response.data.testCase);
+    } catch(error) { setSaveError(getApiErrorMessage(error)); }
+    finally { setIsSavingDraft(false); }
+  };
+  useEffect(() => {
+    const save = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's' && !(event.target instanceof Element && event.target.closest('[role=dialog]'))) { event.preventDefault(); void handleSaveDraft(); }
+    };
+    window.addEventListener('keydown',save);
+    return () => window.removeEventListener('keydown',save);
+  },[currentCase,selectedSuite,isDirty,isSavingDraft,language]);
+
+  const handleDeleteCase = async () => {
+    if (!storedCase || !selectedSuite || isDeleting) return;
+    setIsDeleting(true); setDeleteError(null);
+    try { await api.delete(`/suites/${selectedSuite.id}/cases/${storedCase.id}`); onCaseDeleted(storedCase.id); setSelectedCase(null); setDraft(null); setSingleResponse(null); setDeleteOpen(false); }
+    catch(error) {setDeleteError(getApiErrorMessage(error));}
+    finally {setIsDeleting(false);}
+  };
+  const runSavedCollection = (id: string) => {
+    if (isDirty) { showToast({type:'info',title:text('Salve ou descarte as alterações antes de executar a coleção.', 'Save or discard changes before running the collection.')}); return; }
+    onRunSuite(id);
+  };
 
   useEffect(() => {
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
     setIsSendingSingle(false);
     setSingleResponse(null);
+    setSentCase(null);
     setRequestError(null);
+    setCopied(false);
     return () => { abortControllerRef.current?.abort(); };
   }, [currentCase?.id, effectiveBaseUrl]);
+  useEffect(() => {
+    setIsEditingUrl(false);
+    setUrlError(null);
+  }, [selectedSuite?.id, environment]);
+  useEffect(() => {
+    if (isExecuting || visibleRun) setResponseMode('collection');
+    else setResponseMode('single');
+  }, [isExecuting, visibleRun?.id, selectedSuite?.id]);
+  useEffect(() => () => { if (copyTimerRef.current) clearTimeout(copyTimerRef.current); }, []);
+  useEffect(() => {
+    if (!isEditingUrl) return;
+    const outside = (event: MouseEvent) => { if (!settingsRef.current?.contains(event.target as Node)) setIsEditingUrl(false); };
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setIsEditingUrl(false); };
+    document.addEventListener('mousedown', outside);
+    document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('mousedown', outside); document.removeEventListener('keydown', escape); };
+  }, [isEditingUrl]);
 
   useEffect(() => {
-    if (isExecuting || latestRun) setResponseMode('collection');
-  }, [isExecuting, latestRun?.id]);
+    if (!isSidebarOpen) return;
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { setIsSidebarOpen(false); collectionsToggleRef.current?.focus(); }
+    };
+    document.addEventListener('keydown', escape);
+    return () => document.removeEventListener('keydown', escape);
+  }, [isSidebarOpen]);
 
-  useEffect(() => () => {
-    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
-  }, []);
-
-  // Filtra casos de teste em tempo real com memoização
-  const filteredCases = useMemo(() => {
-    return activeCases.filter(c => 
-      c.name.toLowerCase().includes(activeQuery.toLowerCase()) ||
-      c.path.toLowerCase().includes(activeQuery.toLowerCase()) ||
-      c.method.toLowerCase().includes(activeQuery.toLowerCase())
-    );
-  }, [activeCases, activeQuery]);
-
-  const handleCopy = async (text: string, label = 'Payload') => {
+  const handleCopy = async (value: string, label = 'Payload') => {
     try {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(value);
       setCopied(true);
-      showToast({ type: 'success', title: `${label} copiado!`, message: 'Conteúdo transferido para a área de transferência.' });
+      showToast({ type: 'success', title: text(`${label} copiado`, `${label} copied`) });
       if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
       copyTimerRef.current = setTimeout(() => setCopied(false), 2000);
-    } catch {
-      showToast({ type: 'error', title: 'Não foi possível copiar', message: 'Selecione o conteúdo e copie com o teclado.' });
-    }
+    } catch { showToast({ type: 'error', title: text('Não foi possível copiar', 'Unable to copy'), message: text('Selecione o conteúdo e copie com o teclado.', 'Select the content and copy using your keyboard.') }); }
   };
-
   const handleSaveBaseUrl = async () => {
     if (!onUpdateBaseUrl || isSavingUrl) return;
     try {
       const url = new URL(editedUrl.trim());
-      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
-        setUrlError('Use uma URL HTTP(S) sem credenciais.');
-        return;
-      }
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) { setUrlError(text('Use uma URL HTTP(S) sem credenciais.', 'Use an HTTP(S) URL without credentials.')); return; }
       setIsSavingUrl(true);
       setUrlError(null);
       await onUpdateBaseUrl(editedUrl.trim());
       setIsEditingUrl(false);
-      showToast({ type: 'success', title: 'Base URL atualizada', message: editedUrl.trim() });
-    } catch (error) {
-      setUrlError(error instanceof TypeError ? 'Informe uma URL HTTP(S) válida.' : getApiErrorMessage(error));
-    } finally {
-      setIsSavingUrl(false);
-    }
+      showToast({ type: 'success', title: text('Base URL atualizada', 'Base URL updated') });
+    } catch (error) { setUrlError(error instanceof TypeError ? text('Informe uma URL HTTP(S) válida.', 'Enter a valid HTTP(S) URL.') : getApiErrorMessage(error)); }
+    finally { setIsSavingUrl(false); }
   };
-
-  // Send sempre apresenta a resposta real do motor; falhas de rede não viram resultados de teste.
   const handleSendSingle = async () => {
     if (!currentCase || isExecuting) return;
     if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-      setIsSendingSingle(false);
-      showToast({ type: 'info', title: 'Espera cancelada', message: 'O motor pode concluir a chamada já enviada ao destino.' });
+      abortControllerRef.current.abort(); abortControllerRef.current = null; setIsSendingSingle(false);
+      showToast({ type: 'info', title: text('Espera cancelada', 'Waiting cancelled'), message: text('O motor pode concluir a chamada já enviada ao destino.', 'The engine may complete the call already sent to the target.') });
       return;
     }
-
+    const errors = getRequestDraftErrors(currentCase,language);
+    if (Object.keys(errors).length) { setSaveError(Object.values(errors).join(' ')); return; }
+    const snapshot = {...currentCase};
+    setSentCase(snapshot);
     const controller = new AbortController();
     abortControllerRef.current = controller;
-    setIsSendingSingle(true);
-    setSingleResponse(null);
-    setRequestError(null);
-    setResponseMode('single');
+    setIsSendingSingle(true); setRequestError(null); setSingleResponse(null); setResponseMode('single');
     try {
-      const response = await api.post<SingleResponse>(`/cases/${currentCase.id}/run`, { baseUrl: effectiveBaseUrl }, { signal: controller.signal });
+      const response = await api.post<SingleResponse>(`/cases/${currentCase.id}/run`, { baseUrl: effectiveBaseUrl, overrides: toRequestOverrides(snapshot) }, { signal: controller.signal });
       if (controller.signal.aborted) return;
-      const result = response.data;
-      setSingleResponse(result);
-      showToast({
-        type: assertionPassed(result) ? 'success' : 'warn',
-        title: result.actualStatus ? `HTTP ${result.actualStatus} ${result.statusText || ''}` : 'Falha na chamada ao destino',
-        message: result.errorMessage || `Latência: ${result.latencyMs}ms (SLA: ${result.maxLatencyMs}ms)`
-      });
+      setSingleResponse(response.data);
+      setActiveSingleTab('body');
     } catch (error) {
       if (controller.signal.aborted) return;
-      const message = getApiErrorMessage(error);
-      setRequestError(message);
-      showToast({ type: 'error', title: 'Falha no disparo da requisição', message });
-    } finally {
-      if (abortControllerRef.current === controller) {
-        abortControllerRef.current = null;
-        setIsSendingSingle(false);
-      }
-    }
+      setRequestError(getApiErrorMessage(error));
+    } finally { if (abortControllerRef.current === controller) { abortControllerRef.current = null; setIsSendingSingle(false); } }
   };
 
-  // 3. EXPORTAÇÃO REAL DE RELATÓRIO DE CONFORMIDADE (EXPORT SLA REPORT)
   const handleExportReport = (format: 'json' | 'csv') => {
-    if (!(responseMode === 'single' ? singleResponse : latestRun)) return;
+    if (!(responseMode === 'single' ? singleResponse : visibleRun)) return;
     const reportTimestamp = new Date().toISOString();
     const suiteName = selectedSuite?.name || 'Spectr-Suite';
     const cleanSuiteName = suiteName.replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -296,17 +247,17 @@ export const Workstation: React.FC<WorkstationProps> = ({
           name: selectedSuite?.name,
           baseUrl: effectiveBaseUrl
         },
-        executionSnapshot: responseMode === 'collection' && latestRun ? {
-          runId: latestRun.id,
-          status: latestRun.status,
-          successRate: `${latestRun.successRate}%`,
-          passedTests: latestRun.passedTests,
-          failedTests: latestRun.failedTests,
-          totalTests: latestRun.totalTests,
-          p95LatencyMs: latestRun.p95LatencyMs,
-          p99LatencyMs: latestRun.p99LatencyMs,
-          totalDurationMs: latestRun.totalDurationMs,
-          assertions: latestRun.assertions
+        executionSnapshot: responseMode === 'collection' && visibleRun ? {
+          runId: visibleRun.id,
+          status: visibleRun.status,
+          successRate: `${visibleRun.successRate}%`,
+          passedTests: visibleRun.passedTests,
+          failedTests: visibleRun.failedTests,
+          totalTests: visibleRun.totalTests,
+          p95LatencyMs: visibleRun.p95LatencyMs,
+          p99LatencyMs: visibleRun.p99LatencyMs,
+          totalDurationMs: visibleRun.totalDurationMs,
+          assertions: visibleRun.assertions
         } : null,
         activeSingleResponse: responseMode === 'single' ? singleResponse : null
       };
@@ -324,8 +275,8 @@ export const Workstation: React.FC<WorkstationProps> = ({
       const headers = ['Test Name', 'Method', 'Endpoint', 'HTTP Status', 'Expected Status', 'Status Match', 'Latency (ms)', 'SLA Target (ms)', 'SLA Passed', 'Schema Valid', 'Result', 'Error Message'];
       const rows: string[][] = [];
 
-      if (responseMode === 'collection' && latestRun?.assertions && latestRun.assertions.length > 0) {
-        latestRun.assertions.forEach(ast => {
+      if (responseMode === 'collection' && visibleRun?.assertions && visibleRun.assertions.length > 0) {
+        visibleRun.assertions.forEach(ast => {
           rows.push([
             ast.name,
             ast.method,
@@ -372,7 +323,6 @@ export const Workstation: React.FC<WorkstationProps> = ({
       URL.revokeObjectURL(url);
     }
 
-    setIsExportMenuOpen(false);
     showToast({
       type: 'success',
       title: 'Relatório SLA Exportado',
@@ -380,903 +330,83 @@ export const Workstation: React.FC<WorkstationProps> = ({
     });
   };
 
-  // Badges com contraste calibrado para atender WCAG AA (> 4.5:1) em temas Claro e Escuro
-  const getMethodBadgeClass = (method: string) => {
-    switch (method.toUpperCase()) {
-      case 'GET': return 'bg-emerald-500/15 text-[#077E36] dark:text-[#12D468] border-emerald-500/30';
-      case 'POST': return 'bg-pm-orange/15 text-[#D94F1E] dark:text-pm-orange border-pm-orange/30';
-      case 'PUT': return 'bg-blue-500/15 text-[#0762BE] dark:text-sky-400 border-blue-500/30';
-      case 'DELETE': return 'bg-rose-500/15 text-[#C81B10] dark:text-rose-400 border-rose-500/30';
-      case 'PATCH': return 'bg-purple-500/15 text-[#7C3AED] dark:text-purple-400 border-purple-500/30';
-      default: return 'bg-slate-500/15 text-slate-700 dark:text-slate-300 border-slate-500/30';
-    }
+  const resizeRequest = (percentage: number) => {
+    const height = splitRef.current?.getBoundingClientRect().height || 600;
+    const minimum = Math.min(180, height * 0.35) / height * 100;
+    const maximum = (height - Math.min(230, height * 0.35)) / height * 100;
+    setRequestSize(Math.max(minimum, Math.min(maximum, percentage)));
   };
-
-  const getMethodTextClass = (method: string) => {
-    switch (method.toUpperCase()) {
-      case 'GET': return 'text-pm-get';
-      case 'POST': return 'text-pm-post';
-      case 'PUT': return 'text-pm-put';
-      case 'DELETE': return 'text-pm-delete';
-      case 'PATCH': return 'text-pm-patch';
-      default: return 'text-slate-400';
-    }
-  };
+  const panelHeight = splitRef.current?.getBoundingClientRect().height || 600;
+  const minimumRequestSize = Math.round(Math.min(180, panelHeight * 0.35) / panelHeight * 100);
+  const maximumRequestSize = Math.round((panelHeight - Math.min(230, panelHeight * 0.35)) / panelHeight * 100);
+  const sidebar = <CollectionsSidebar
+    suites={suites} selectedSuite={selectedSuite} currentCaseId={currentCase?.id}
+    searchQuery={searchQuery || localSearch} onSearchChange={setSearchQuery || setLocalSearch}
+    onSelectSuite={suite => { if (!isExecuting && suite.id !== selectedSuite?.id) discardBefore(() => onSelectSuite(suite)); }}
+    onSelectCase={(suite, testCase) => { if (isExecuting || testCase.id === storedCase?.id) {setIsSidebarOpen(false);return;} discardBefore(() => {if(suite.id!==selectedSuite?.id)onSelectSuite(suite);setSelectedCase(testCase);setIsSidebarOpen(false);}); }}
+    onCreateSuite={onOpenCreateModal} onCreateEndpoint={onOpenCreateEndpointModal}
+    onRunSuite={runSavedCollection} isExecuting={isExecuting || isSavingDraft} onDeleteCase={() => {setDeleteError(null);setDeleteOpen(true);}} onClose={() => setIsSidebarOpen(false)} />;
 
   return (
-    <div className="flex-1 min-w-0 flex flex-col md:flex-row overflow-hidden bg-pm-light-bg dark:bg-pm-dark-bg transition-colors duration-200 select-none">
-      
-      <div className="md:hidden flex shrink-0 items-center justify-between gap-3 border-b border-pm-light-border dark:border-pm-dark-border bg-pm-light-sidebar dark:bg-pm-dark-sidebar px-3 py-2 text-xs">
-        <button className="flex shrink-0 items-center gap-1.5 font-semibold text-pm-orange" aria-expanded={isSidebarOpen} aria-controls="collections-sidebar" onClick={() => setIsSidebarOpen(open => !open)}>
-          <Folder className="h-3.5 w-3.5" />{t.collectionsHeader}<ChevronDown className={`h-3 w-3 transition-transform ${isSidebarOpen ? 'rotate-180' : ''}`} />
-        </button>
-        <span className="truncate text-[11px] text-pm-light-textMuted dark:text-pm-dark-textMuted">{currentCase?.name || selectedSuite?.name || t.selectCollectionPrompt}</span>
+    <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-pm-light-bg dark:bg-pm-dark-bg">
+      {isSidebarOpen && <button type="button" aria-label={text('Fechar painel de coleções', 'Close collections panel')} onClick={() => setIsSidebarOpen(false)} className="absolute inset-0 z-30 bg-black/35 md:hidden" />}
+      <aside aria-label={text('Navegador de coleções', 'Collections browser')} className={`${isSidebarOpen ? 'absolute inset-y-0 left-0 z-40 block w-[min(300px,calc(100vw_-_32px))] shadow-xl' : 'hidden'} h-full shrink-0 border-r border-pm-light-border bg-pm-light-sidebar dark:border-pm-dark-border dark:bg-pm-dark-sidebar md:static md:z-auto md:block md:w-60 md:shadow-none xl:w-64`}>{sidebar}</aside>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className="relative z-20 flex h-10 shrink-0 items-center justify-between gap-2 border-b border-pm-light-border bg-pm-light-sidebar pl-2 pr-3 dark:border-pm-dark-border dark:bg-pm-dark-sidebar sm:pl-4 sm:pr-5">
+          <div className="flex h-full min-w-0 flex-1 items-center gap-2">
+            <button ref={collectionsToggleRef} type="button" aria-label={text('Mostrar coleções', 'Show collections')} aria-expanded={isSidebarOpen} className="workbench-icon md:hidden" onClick={() => setIsSidebarOpen(open => !open)}><Folder className="h-4 w-4" /></button>
+            <div className="flex h-full min-w-0 max-w-sm items-center gap-2 border-t-2 border-pm-orange bg-pm-light-bg px-2.5 text-xs dark:bg-pm-dark-bg sm:px-3">
+              {currentCase && <span className="shrink-0 font-mono text-[10px] font-semibold text-pm-light-textMuted dark:text-pm-dark-textMuted">{currentCase.method}</span>}
+              <span title={currentCase?.name || selectedSuite?.name} className="truncate font-medium">{currentCase?.name || selectedSuite?.name || text('Visão geral', 'Overview')}</span>
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-1 sm:gap-2">
+            <select aria-label={t.activeEnvLabel} disabled={isExecuting || isSendingSingle} value={environment} onChange={event => onEnvironmentChange(event.target.value)} className="h-7 max-w-[112px] cursor-pointer rounded border-0 bg-transparent pr-1 text-[11px] text-pm-light-textMuted focus:text-pm-light-text dark:text-pm-dark-textMuted dark:focus:text-pm-dark-text sm:max-w-[165px]">
+              <option value="production" className="bg-pm-light-surface dark:bg-pm-dark-surface">{t.envProduction}</option>
+              <option value="staging" className="bg-pm-light-surface dark:bg-pm-dark-surface">{t.envStaging}</option>
+              <option value="local" className="bg-pm-light-surface dark:bg-pm-dark-surface">{t.envLocal}</option>
+            </select>
+            <div ref={settingsRef}>
+              <button type="button" title={text('Configurar Base URL', 'Configure Base URL')} aria-label={text('Configurar Base URL', 'Configure Base URL')} aria-expanded={isEditingUrl} disabled={!selectedSuite || isExecuting || isSendingSingle} onClick={() => { setEditedUrl(selectedSuite?.baseUrl || ''); setUrlError(null); setIsEditingUrl(open => !open); }} className="workbench-icon"><Edit3 className="h-3.5 w-3.5" /></button>
+              {isEditingUrl && <div className="absolute right-2 top-full z-50 mt-1 w-[min(360px,calc(100vw-24px))] rounded-md border border-pm-light-border bg-pm-light-surface p-4 shadow-xl dark:border-pm-dark-border dark:bg-pm-dark-surface">
+                <p className="mb-1 text-xs font-medium">{text('Ambiente de execução', 'Execution environment')}</p>
+                <p className="mb-4 break-all font-mono text-[11px] leading-relaxed text-pm-light-textMuted dark:text-pm-dark-textMuted">{effectiveBaseUrl || text('Selecione uma coleção', 'Select a collection')}</p>
+                {environment === 'production' && onUpdateBaseUrl ? <form onSubmit={event => { event.preventDefault(); void handleSaveBaseUrl(); }} className="space-y-3">
+                  <label className="block text-xs" htmlFor="collection-base-url">{text('Base URL da coleção', 'Collection Base URL')}</label>
+                  <input id="collection-base-url" type="url" autoFocus required value={editedUrl} disabled={isSavingUrl} onChange={event => setEditedUrl(event.target.value)} className="h-9 w-full rounded border border-pm-light-border bg-pm-light-bg px-2 font-mono text-xs dark:border-pm-dark-border dark:bg-pm-dark-bg" />
+                  {urlError && <p role="alert" className="text-xs text-rose-600 dark:text-rose-400">{urlError}</p>}
+                  <div className="flex justify-end gap-2"><button type="button" className="workbench-button" disabled={isSavingUrl} onClick={() => setIsEditingUrl(false)}>{t.cancelBtn}</button><button disabled={isSavingUrl} className="workbench-button" type="submit">{isSavingUrl ? text('Salvando…', 'Saving…') : text('Salvar', 'Save')}</button></div>
+                </form> : <p className="text-xs leading-relaxed text-pm-light-textMuted dark:text-pm-dark-textMuted">{text('Use “URL da coleção” para editar o endereço salvo.', 'Choose “Collection URL” to edit the saved address.')}</p>}
+                {currentCase && /^https?:\/\//i.test(currentCase.path) && <p className="mt-3 border-t border-pm-light-border pt-3 text-[11px] leading-relaxed text-pm-light-textMuted dark:border-pm-dark-border dark:text-pm-dark-textMuted">{text('Este endpoint usa uma URL absoluta e mantém seu próprio destino.', 'This endpoint uses an absolute URL and keeps its own destination.')}</p>}
+              </div>}
+            </div>
+            <button type="button" onClick={() => { if (selectedSuite) runSavedCollection(selectedSuite.id); }} disabled={!selectedSuite || isExecuting || isSendingSingle || isDirty || !activeCases.some(testCase => testCase.active)} title={t.runCollection} aria-label={t.runCollection} className="workbench-button h-7 gap-1.5 px-2"><Play className={`h-3 w-3 ${isExecuting ? 'animate-pulse' : ''}`} /><span className="hidden sm:inline">{isExecuting ? t.running : 'Run'}</span></button>
+          </div>
+        </div>
+        <div ref={splitRef} className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div data-testid="request-pane" className="min-h-0 shrink-0 overflow-hidden" style={{ height: `${requestSize}%` }}>
+            <RequestPanel currentCase={currentCase} requestUrl={requestUrl} requestHeaders={requestHeaders} isExecuting={isExecuting} isSending={isSendingSingle} onSend={() => void handleSendSingle()} onCreate={selectedSuite ? onOpenCreateEndpointModal : onOpenCreateModal} hasSuite={!!selectedSuite} onChange={patch => {if(currentCase)setDraft({...currentCase,...patch});setSaveError(null);}} onSave={() => void handleSaveDraft()} onDiscard={() => {setDraft(null);setSaveError(null);}} isDirty={isDirty} isSaving={isSavingDraft} saveError={saveError} onDelete={() => {setDeleteError(null);setDeleteOpen(true);}} />
+          </div>
+          <div role="separator" aria-label={text('Redimensionar editor e resposta', 'Resize request and response')} aria-orientation="horizontal" aria-valuenow={Math.round(requestSize)} aria-valuemin={minimumRequestSize} aria-valuemax={maximumRequestSize} tabIndex={0}
+            onPointerDown={event => { resizingRef.current = true; event.currentTarget.setPointerCapture(event.pointerId); event.preventDefault(); }}
+            onPointerMove={event => { if (!resizingRef.current) return; const rect = splitRef.current?.getBoundingClientRect(); if (rect?.height) resizeRequest((event.clientY - rect.top) / rect.height * 100); }}
+            onPointerUp={event => { resizingRef.current = false; event.currentTarget.releasePointerCapture(event.pointerId); }}
+            onLostPointerCapture={() => { resizingRef.current = false; }}
+            onKeyDown={event => { if (['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) { event.preventDefault(); resizeRequest(event.key === 'Home' ? 20 : event.key === 'End' ? 80 : requestSize + (event.key === 'ArrowUp' ? -4 : 4)); } }}
+            className="group relative z-10 flex h-2 shrink-0 touch-none cursor-row-resize items-center justify-center border-y border-pm-light-border bg-pm-light-bg transition-colors hover:bg-pm-orange/10 focus-visible:bg-pm-orange/10 dark:border-pm-dark-border dark:bg-pm-dark-bg">
+            <span className="h-0.5 w-8 rounded bg-pm-light-border transition-colors group-hover:bg-pm-orange/60 dark:bg-pm-dark-border" />
+          </div>
+          <div data-testid="response-pane" className="min-h-0 flex-1 overflow-hidden">
+            <ResponsePanel currentCase={sentCase || currentCase} singleResponse={singleResponse} latestRun={visibleRun} isSendingSingle={isSendingSingle} isExecuting={isExecuting} requestError={requestError} requestUrl={requestUrl} responseMode={responseMode} onResponseModeChange={setResponseMode} activeSingleTab={activeSingleTab} onSingleTabChange={setActiveSingleTab} activeCollectionTab={activeCollectionTab} onCollectionTabChange={setActiveCollectionTab} onRetry={() => void handleSendSingle()} onCopy={handleCopy} copied={copied} onExport={handleExportReport} />
+          </div>
+        </div>
       </div>
-      {/* ── POSTMAN COLLECTIONS SIDEBAR ── */}
-      <div id="collections-sidebar" role="region" aria-label={t.collectionsHeader} className={`${isSidebarOpen ? 'flex' : 'hidden'} md:flex w-full md:w-72 lg:w-80 max-h-[50%] md:max-h-none bg-pm-light-sidebar dark:bg-pm-dark-sidebar border-r border-pm-light-border dark:border-pm-dark-border flex-col shrink-0`}>
-        
-        {/* Collections Toolbar */}
-        <div className="p-3 border-b border-pm-light-border dark:border-pm-dark-border space-y-2.5">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-pm-light-text dark:text-pm-dark-text uppercase tracking-wider font-mono flex items-center gap-1.5">
-              <Folder className="w-3.5 h-3.5 text-pm-orange" />
-              {t.collectionsHeader}
-            </span>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={onOpenCreateEndpointModal}
-                disabled={!selectedSuite}
-                title="Adicionar Novo Request/Endpoint"
-                className="px-2 py-1 rounded bg-pm-orange/15 hover:bg-pm-orange/25 border border-pm-orange/40 text-pm-orange text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer disabled:opacity-40"
-              >
-                <Plus className="w-3 h-3" />
-                <span>{t.requestBtn}</span>
-              </button>
-              <button
-                onClick={onOpenCreateModal}
-                title="Criar Nova Coleção"
-                className="p-1 rounded bg-pm-light-panel dark:bg-pm-dark-panel hover:bg-pm-light-panelHover dark:hover:bg-pm-dark-panelHover border border-pm-light-border dark:border-pm-dark-border text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-light-text dark:hover:text-pm-dark-text transition-colors text-[10px] flex items-center gap-1 cursor-pointer"
-              >
-                <Plus className="w-3 h-3" />
-                <span>{t.collectionBtn}</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Search Box com feedback de correspondências */}
-          <div className="relative">
-            <Search className="w-3.5 h-3.5 text-pm-light-textMuted dark:text-pm-dark-textMuted absolute left-2.5 top-1/2 -translate-y-1/2" />
-            <input
-              id="collection-search"
-              aria-label={t.filterPlaceholder}
-              type="search"
-              value={activeQuery}
-              onChange={(e) => {
-                setLocalSearch(e.target.value);
-                if (setSearchQuery) setSearchQuery(e.target.value);
-              }}
-              placeholder={t.filterPlaceholder}
-              className="w-full pl-8 pr-12 py-1.5 bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border rounded text-[11px] text-pm-light-text dark:text-pm-dark-text placeholder-pm-light-textMuted dark:placeholder-pm-dark-textMuted focus:outline-none focus:border-pm-orange"
-            />
-            {activeQuery && (
-              <span className="absolute right-2 top-1/2 -translate-y-1/2 px-1 rounded bg-pm-orange/20 text-pm-orange text-[9px] font-mono font-bold">
-                {filteredCases.length}
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* Collection Selector Tabs */}
-        <div className="px-3 py-2 border-b border-pm-light-border dark:border-pm-dark-border overflow-x-auto flex gap-1.5 scrollbar-none">
-          {suites.map((s) => (
-            <button
-              key={s.id}
-              disabled={isExecuting}
-              aria-pressed={selectedSuite?.id === s.id}
-              onClick={() => {
-                onSelectSuite(s);
-                setSelectedCase(s.cases[0] || null);
-              }}
-              className={`px-2.5 py-1 rounded text-[11px] font-medium whitespace-nowrap transition-all cursor-pointer border ${
-                selectedSuite?.id === s.id
-                  ? 'bg-pm-orange text-white border-pm-orange shadow-sm font-semibold'
-                  : 'bg-pm-light-panel dark:bg-pm-dark-panel border-pm-light-border dark:border-pm-dark-border text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-light-text dark:hover:text-pm-dark-text'
-              }`}
-            >
-              <HighlightText text={s.name.split('──')[0].trim()} query={activeQuery} />
-            </button>
-          ))}
-        </div>
-
-        {/* Requests Tree */}
-        <div className="flex-1 overflow-y-auto p-2 space-y-1">
-          {selectedSuite ? (
-            <div>
-              {/* Collection Header Row */}
-              <div className="px-2 py-1.5 rounded flex items-center justify-between text-xs font-semibold text-pm-light-text dark:text-pm-dark-text mb-1">
-                <div className="flex items-center gap-1.5 truncate">
-                  <ChevronDown className="w-3.5 h-3.5 text-pm-light-textMuted dark:text-pm-dark-textMuted" />
-                  <span className="truncate">
-                    <HighlightText text={selectedSuite.name} query={activeQuery} />
-                  </span>
-                </div>
-                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border text-pm-light-textMuted dark:text-pm-dark-textMuted">
-                  {filteredCases.length}
-                </span>
-              </div>
-
-              {/* Request Items */}
-              <div className="pl-3 space-y-0.5">
-                {filteredCases.length === 0 ? (
-                  <div className="py-4 text-center text-xs text-pm-light-textMuted dark:text-pm-dark-textMuted space-y-2">
-                    <p>{activeCases.length ? t.noRequestsFound : t.noRequestSelected}</p>
-                    {!activeCases.length && <button className="font-semibold text-pm-orange hover:underline" onClick={onOpenCreateEndpointModal}>{t.createEndpointTitle}</button>}
-                  </div>
-                ) : (
-                  filteredCases.map((c) => {
-                    const isCurrent = currentCase?.id === c.id;
-                    return (
-                      <motion.button
-                        type="button"
-                        aria-pressed={isCurrent}
-                        title={`${c.method} ${c.path}`}
-                        key={c.id}
-                        whileHover={{ x: 2 }}
-                        onClick={() => { setSelectedCase(c); setIsSidebarOpen(false); }}
-                        className={`w-full text-left min-h-9 px-2.5 py-1.5 rounded flex items-center justify-between gap-2 cursor-pointer transition-colors text-xs ${
-                          isCurrent
-                            ? 'bg-pm-light-panelHover dark:bg-pm-dark-panelHover border-l-2 border-pm-orange text-pm-light-text dark:text-pm-dark-text font-medium'
-                            : 'hover:bg-pm-light-panel dark:hover:bg-pm-dark-panel text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-light-text dark:hover:text-pm-dark-text'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 truncate min-w-0">
-                          <span className={`font-mono text-[10px] font-bold w-9 uppercase shrink-0 ${getMethodTextClass(c.method)}`}>
-                            <HighlightText text={c.method} query={activeQuery} />
-                          </span>
-                          <span className="truncate text-[11px] font-mono">
-                            <HighlightText text={c.name} query={activeQuery} />
-                          </span>
-                        </div>
-                        <span className="text-[10px] font-mono text-pm-light-textMuted dark:text-pm-dark-textMuted shrink-0">
-                          {c.maxLatencyMs}ms
-                        </span>
-                      </motion.button>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-          ) : (
-            <div className="p-5 text-center text-xs text-pm-light-textMuted dark:text-pm-dark-textMuted space-y-3">
-              <Folder className="mx-auto h-7 w-7 opacity-40" />
-              <p>{t.selectCollectionPrompt}</p>
-              <button className="rounded border border-pm-orange/40 px-3 py-1.5 font-semibold text-pm-orange hover:bg-pm-orange/10" onClick={onOpenCreateModal}>{t.createSuiteTitle}</button>
-            </div>
-          )}
-        </div>
-
-        {/* Sidebar Footer */}
-        <div className="p-2.5 border-t border-pm-light-border dark:border-pm-dark-border bg-pm-light-panel dark:bg-pm-dark-panel flex items-center justify-between text-[10px] font-mono text-pm-light-textMuted dark:text-pm-dark-textMuted">
-          <span>{filteredCases.length} {t.endpointsReady}</span>
-          <span className="text-pm-orange font-medium flex items-center gap-1">
-            <Globe className="w-2.5 h-2.5" />
-            {activeEnvConfig.badge}
-          </span>
-        </div>
-
-      </div>
-
-
-      {/* ── COLUNA PRINCIPAL: REQUEST WORKBENCH & RESPONSE PANE ── */}
-      <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden">
-        
-        {/* 1. Request Address Bar & Send Button */}
-        <div className="p-3 border-b border-pm-light-border dark:border-pm-dark-border bg-pm-light-surface dark:bg-pm-dark-surface flex items-center gap-2">
-          {currentCase ? (
-            <>
-              {/* Method Selector */}
-              <div className={`px-3 py-1.5 rounded border text-xs font-bold font-mono uppercase tracking-wider ${getMethodBadgeClass(currentCase.method)}`}>
-                {currentCase.method}
-              </div>
-
-              {/* URL Address Bar com variável {{BASE_URL}} e disparo via Enter */}
-              <div 
-                className="flex-1 min-w-0 flex items-center bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border rounded px-3 py-1.5 text-xs font-mono overflow-hidden relative group cursor-text"
-                onClick={() => setShowResolvedUrl(!showResolvedUrl)}
-                title={t.clickToToggleUrl}
-              >
-                {!/^https?:\/\//i.test(currentCase.path) && <span className="text-pm-orange font-bold mr-1 truncate shrink-0 max-w-[45%] select-none">
-                  {showResolvedUrl ? effectiveBaseUrl.replace(/\/+$/, '') : '{{BASE_URL}}'}
-                </span>}
-                <input
-                  aria-label="URL da requisição"
-                  title={requestUrl}
-                  type="text"
-                  readOnly
-                  value={currentCase.path}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      handleSendSingle();
-                    }
-                  }}
-                  className="bg-transparent text-pm-light-text dark:text-pm-dark-text font-semibold flex-1 min-w-0 focus:outline-none cursor-pointer"
-                />
-                <span className="text-[10px] text-pm-light-textMuted dark:text-pm-dark-textMuted font-mono hidden md:inline ml-2 opacity-50">
-                  {t.enterToSendHint}
-                </span>
-              </div>
-
-              {/* Send Button (Disparo Individual com microanimação) */}
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={handleSendSingle}
-                disabled={isExecuting}
-                aria-label={isSendingSingle ? 'Cancelar espera da requisição' : t.sendBtn}
-                className="px-4 py-1.5 bg-pm-orange hover:bg-pm-orangeHover disabled:opacity-50 text-white font-semibold rounded text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer font-sans"
-              >
-                <Send className={`w-3.5 h-3.5 ${isSendingSingle ? 'animate-spin' : ''}`} />
-                <span>{isSendingSingle ? 'Cancelar' : t.sendBtn}</span>
-              </motion.button>
-            </>
-          ) : (
-            <div className="flex min-w-0 flex-wrap items-center gap-3 text-xs">
-              <span className="text-pm-light-textMuted dark:text-pm-dark-textMuted">{t.noRequestSelected}</span>
-              <button className="font-semibold text-pm-orange hover:underline" onClick={selectedSuite ? onOpenCreateEndpointModal : onOpenCreateModal}>{selectedSuite ? t.createEndpointTitle : t.createSuiteTitle}</button>
-            </div>
-          )}
-        </div>
-
-        {/* 2. Base URL Config & Environment Indicator Bar */}
-        {selectedSuite && (
-          <div className="px-3 py-1.5 bg-pm-light-panel dark:bg-pm-dark-panel border-b border-pm-light-border dark:border-pm-dark-border flex flex-wrap gap-2 items-center justify-between text-[11px] font-mono">
-            <div className="flex min-w-0 items-center gap-2">
-              <span className="text-pm-light-textMuted dark:text-pm-dark-textMuted font-bold">{t.activeEnvLabel}:</span>
-              <span className="px-1.5 py-0.5 rounded bg-pm-orange/15 text-pm-orange font-bold text-[10px] border border-pm-orange/30">
-                {activeEnvConfig.name}
-              </span>
-              <span className="text-pm-light-textMuted dark:text-pm-dark-textMuted">❯</span>
-              {isEditingUrl ? (
-                <form className="flex min-w-0 flex-wrap items-center gap-2" onSubmit={event => { event.preventDefault(); void handleSaveBaseUrl(); }}>
-                  <input type="url" autoFocus required aria-label="Base URL da coleção" value={editedUrl} disabled={isSavingUrl} onChange={event => setEditedUrl(event.target.value)} className="min-w-0 w-52 rounded border border-pm-light-border dark:border-pm-dark-border bg-pm-light-bg dark:bg-pm-dark-bg px-2 py-1 text-xs" />
-                  <button disabled={isSavingUrl} className="font-semibold text-pm-orange" type="submit">{isSavingUrl ? 'Salvando...' : 'Salvar'}</button>
-                  <button disabled={isSavingUrl} type="button" onClick={() => setIsEditingUrl(false)}>Cancelar</button>
-                  {urlError && <p role="alert" className="w-full text-rose-500">{urlError}</p>}
-                </form>
-              ) : (
-                <>
-                  <span title={effectiveBaseUrl} className="text-pm-light-text dark:text-pm-dark-text truncate max-w-[40vw] select-text">{effectiveBaseUrl}</span>
-                  {environment === 'production' && onUpdateBaseUrl && <button title="Editar Base URL da coleção" aria-label="Editar Base URL da coleção" className="text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-orange" onClick={() => { setEditedUrl(selectedSuite.baseUrl); setUrlError(null); setIsEditingUrl(true); }}><Edit3 className="h-3.5 w-3.5" /></button>}
-                </>
-              )}
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3 text-pm-light-textMuted dark:text-pm-dark-textMuted">
-              <span>{t.expectedStatusLabel}: <strong className="text-emerald-500 font-bold">{currentCase?.expectedStatus || '—'}</strong></span>
-              <span>•</span>
-              <span>{t.slaTargetLabel}: <strong className="text-pm-orange">{currentCase?.maxLatencyMs || 250}ms</strong></span>
-            </div>
-          </div>
-        )}
-
-        {currentCase && /^https?:\/\//i.test(currentCase.path) && <p className="shrink-0 border-b border-pm-light-border dark:border-pm-dark-border px-3 py-1 text-[10px] text-pm-light-textMuted dark:text-pm-dark-textMuted">URL absoluta: este endpoint mantém o próprio destino ao alternar o ambiente.</p>}
-
-        {/* 3. Request Settings Tabs com layoutId Indicador Fluido */}
-        <div className="overflow-x-auto shrink-0 border-b border-pm-light-border dark:border-pm-dark-border bg-pm-light-surface dark:bg-pm-dark-surface px-3 flex items-center gap-1 text-xs relative">
-          {[
-            { id: 'assertions', label: t.tabAssertions, count: 2 },
-            { id: 'headers', label: t.tabHeaders, count: Object.keys(requestHeaders).length },
-            { id: 'body', label: t.tabBody, count: currentCase?.body ? 1 : 0 },
-            { id: 'schema', label: t.tabSchema, count: currentCase?.expectedSchema ? 1 : 0 },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveRequestTab(tab.id as any)}
-              className={`px-3 py-2 font-medium text-[11px] transition-colors relative cursor-pointer ${
-                activeRequestTab === tab.id
-                  ? 'text-pm-orange font-semibold'
-                  : 'text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-light-text dark:hover:text-pm-dark-text'
-              }`}
-            >
-              {activeRequestTab === tab.id && (
-                <motion.div
-                  layoutId="activeRequestTabIndicator"
-                  className="absolute bottom-0 left-0 right-0 h-0.5 bg-pm-orange"
-                  transition={{ type: 'spring', stiffness: 380, damping: 30 }}
-                />
-              )}
-              <div className="flex items-center gap-1.5">
-                <span>{tab.label}</span>
-                {tab.count > 0 && (
-                  <span className="text-[9px] px-1 rounded-full bg-pm-light-panel dark:bg-pm-dark-panel text-pm-light-textMuted dark:text-pm-dark-textMuted">
-                    {tab.count}
-                  </span>
-                )}
-              </div>
-            </button>
-          ))}
-        </div>
-
-        {/* 4. Request Configuration Viewport */}
-        <div className="h-32 md:h-40 shrink-0 p-3 bg-pm-light-bg dark:bg-pm-dark-bg border-b border-pm-light-border dark:border-pm-dark-border overflow-y-auto text-xs font-mono">
-          <AnimatePresence mode="wait">
-            {activeRequestTab === 'assertions' && (
-              <motion.div
-                key="tab-assertions"
-                initial={{ opacity: 0, y: 4 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -4 }}
-                transition={{ duration: 0.15 }}
-                className="space-y-2"
-              >
-                <div className="flex items-center justify-between p-2 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                    <span>{t.statusCodeCheck}</span>
-                  </div>
-                  <span className="text-emerald-500 font-bold">pm.response.to.have.status({currentCase?.expectedStatus || 200})</span>
-                </div>
-
-                <div className="flex items-center justify-between p-2 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border">
-                  <div className="flex items-center gap-2">
-                    <Clock className="w-3.5 h-3.5 text-pm-orange" />
-                    <span>{t.latencySlaCheck}</span>
-                  </div>
-                  <span className="text-pm-orange font-bold">pm.response.responseTime &lt; {currentCase?.maxLatencyMs || 250}ms</span>
-                </div>
-              </motion.div>
-            )}
-
-            {activeRequestTab === 'headers' && (
-              <motion.div
-                key="tab-headers"
-                initial={{ opacity: 0, y: 4 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -4 }}
-                transition={{ duration: 0.15 }}
-                className="space-y-1.5"
-              >
-                <div className="grid grid-cols-12 gap-2 text-pm-light-textMuted dark:text-pm-dark-textMuted font-bold text-[10px] pb-1 border-b border-pm-light-border dark:border-pm-dark-border">
-                  <span className="col-span-5">KEY</span>
-                  <span className="col-span-7">VALUE</span>
-                </div>
-                {Object.entries(requestHeaders).map(([key, value]) => (
-                  <div key={key} className="grid grid-cols-12 gap-2 text-[11px]">
-                    <span className="col-span-5 text-pm-orange font-semibold break-all">{key}</span>
-                    <span className="col-span-7 text-pm-light-text dark:text-pm-dark-text break-all select-text">{value}</span>
-                  </div>
-                ))}
-              </motion.div>
-            )}
-
-            {activeRequestTab === 'body' && (
-              <motion.div
-                key="tab-body"
-                initial={{ opacity: 0, y: 4 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -4 }}
-                transition={{ duration: 0.15 }}
-              >
-                {currentCase?.body ? (
-                  <div className="p-2 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border overflow-hidden">
-                    <JsonSyntaxView data={parseJsonOrText(currentCase.body)} raw={currentCase.body} />
-                  </div>
-                ) : (
-                  <p className="text-pm-light-textMuted dark:text-pm-dark-textMuted py-4 text-center">{t.noBodyConfigured}</p>
-                )}
-              </motion.div>
-            )}
-
-            {activeRequestTab === 'schema' && (
-              <motion.div
-                key="tab-schema"
-                initial={{ opacity: 0, y: 4 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -4 }}
-                transition={{ duration: 0.15 }}
-              >
-                {currentCase?.expectedSchema ? (
-                  <pre className="p-2 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border text-[11px] text-pm-light-text dark:text-pm-dark-text overflow-x-auto">
-                    {currentCase.expectedSchema}
-                  </pre>
-                ) : (
-                  <p className="text-pm-light-textMuted dark:text-pm-dark-textMuted py-4 text-center">{t.autoContractValidation}</p>
-                )}
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-
-
-        {/* 5. Postman Response Pane (Single Request Response & Collection Runner Stream) */}
-        <div className="flex-1 flex flex-col min-h-0 bg-pm-light-surface dark:bg-pm-dark-surface">
-          
-          {/* Response Pane Header Bar */}
-          <div className="min-h-10 py-2 gap-2 flex-wrap bg-pm-light-sidebar dark:bg-pm-dark-sidebar border-b border-pm-light-border dark:border-pm-dark-border px-3 flex items-center justify-between text-xs shrink-0">
-            
-            {/* Left: Mode Switcher & Tabs */}
-            <div className="flex flex-wrap items-center gap-2">
-              
-              {/* Selector de Modo com Pílula Animada */}
-              <div className="flex items-center bg-pm-light-bg dark:bg-pm-dark-bg p-0.5 rounded border border-pm-light-border dark:border-pm-dark-border relative">
-                <button
-                  onClick={() => setResponseMode('single')}
-                  className={`px-2.5 py-0.5 rounded text-[10px] font-bold transition-all relative cursor-pointer ${
-                    responseMode === 'single'
-                      ? 'text-white'
-                      : 'text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-light-text dark:hover:text-pm-dark-text'
-                  }`}
-                >
-                  {responseMode === 'single' && (
-                    <motion.div
-                      layoutId="responseModeIndicator"
-                      className="absolute inset-0 bg-pm-orange rounded shadow-sm"
-                      transition={{ type: 'spring', stiffness: 380, damping: 30 }}
-                    />
-                  )}
-                  <span className="relative z-10">{t.modeSingleResponse}</span>
-                </button>
-
-                <button
-                  onClick={() => setResponseMode('collection')}
-                  className={`px-2.5 py-0.5 rounded text-[10px] font-bold transition-all relative cursor-pointer ${
-                    responseMode === 'collection'
-                      ? 'text-white'
-                      : 'text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-light-text dark:hover:text-pm-dark-text'
-                  }`}
-                >
-                  {responseMode === 'collection' && (
-                    <motion.div
-                      layoutId="responseModeIndicator"
-                      className="absolute inset-0 bg-pm-orange rounded shadow-sm"
-                      transition={{ type: 'spring', stiffness: 380, damping: 30 }}
-                    />
-                  )}
-                  <span className="relative z-10">{t.modeCollectionRunner}</span>
-                </button>
-              </div>
-
-              {/* Sub-tabs dependendo do modo ativo */}
-              {responseMode === 'single' ? (
-                <div className="flex items-center gap-1 pl-2 border-l border-pm-light-border dark:border-pm-dark-border relative">
-                  {[
-                    { id: 'body', label: t.subtabBody },
-                    { id: 'tests', label: t.subtabTestResults },
-                    { id: 'headers', label: `${t.subtabHeaders} (${singleResponse ? Object.keys(singleResponse.responseHeaders).length : 0})` }
-                  ].map(tab => (
-                    <button
-                      key={tab.id}
-                      onClick={() => setActiveSingleTab(tab.id as any)}
-                      className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer relative ${
-                        activeSingleTab === tab.id
-                          ? 'text-pm-orange font-bold'
-                          : 'text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-light-text dark:hover:text-pm-dark-text'
-                      }`}
-                    >
-                      {activeSingleTab === tab.id && (
-                        <motion.div
-                          layoutId="singleSubTabIndicator"
-                          className="absolute bottom-0 left-1 right-1 h-0.5 bg-pm-orange"
-                          transition={{ type: 'spring', stiffness: 380, damping: 30 }}
-                        />
-                      )}
-                      <span>{tab.label}</span>
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <div className="flex items-center gap-1 pl-2 border-l border-pm-light-border dark:border-pm-dark-border">
-                  <button
-                    onClick={() => setActiveCollectionTab('cli')}
-                    className={`px-2.5 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer ${
-                      activeCollectionTab === 'cli'
-                        ? 'text-pm-orange font-bold underline'
-                        : 'text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-light-text dark:hover:text-pm-dark-text'
-                    }`}
-                  >
-                    {t.subtabCliStream}
-                  </button>
-                  <button
-                    onClick={() => setActiveCollectionTab('breakdown')}
-                    className={`px-2.5 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer ${
-                      activeCollectionTab === 'breakdown'
-                        ? 'text-pm-orange font-bold underline'
-                        : 'text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-light-text dark:hover:text-pm-dark-text'
-                    }`}
-                  >
-                    {t.subtabBreakdown} ({latestRun?.assertions?.length || 0})
-                  </button>
-                </div>
-              )}
-
-            </div>
-
-            {/* Right: Metrics Pills & Export SLA Report Button */}
-            <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono">
-              
-              {/* Status Pills */}
-              {responseMode === 'single' && singleResponse ? (
-                <>
-                  <motion.span 
-                    initial={{ scale: 0.9, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    className={`px-2 py-0.5 rounded font-bold border ${
-                      singleResponse.statusMatch
-                        ? 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30'
-                        : 'bg-rose-500/15 text-rose-500 border-rose-500/30'
-                    }`}
-                  >
-                    {t.statusLabel}: {singleResponse.actualStatus} {singleResponse.statusText}
-                  </motion.span>
-                  <span className="px-2 py-0.5 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border text-pm-light-text dark:text-pm-dark-text">
-                    {t.timeLabel}: <strong className="text-pm-orange">{singleResponse.latencyMs}ms</strong>
-                  </span>
-                  <span className="px-2 py-0.5 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border text-pm-light-text dark:text-pm-dark-text">
-                    {t.sizeLabel}: <strong className="text-pm-light-text dark:text-pm-dark-text">{singleResponse.responseSize}</strong>
-                  </span>
-                </>
-              ) : latestRun ? (
-                <>
-                  <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 font-bold">
-                    {latestRun.passedTests}/{latestRun.totalTests} PASS ({latestRun.successRate}%)
-                  </span>
-                  <span className="px-2 py-0.5 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border text-pm-light-text dark:text-pm-dark-text">
-                    Time: <strong className="text-pm-orange">{latestRun.totalDurationMs}ms</strong>
-                  </span>
-                  <span className="px-2 py-0.5 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border text-pm-light-text dark:text-pm-dark-text">
-                    p95: <strong className="text-pm-orange">{latestRun.p95LatencyMs}ms</strong>
-                  </span>
-                </>
-              ) : null}
-
-              {/* 3. EXPORTAÇÃO REAL DE RELATÓRIO DE CONFORMIDADE (NOVA FEATURE) */}
-              <div className="relative">
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
-                  disabled={!(responseMode === 'single' ? singleResponse : latestRun)}
-                  aria-expanded={isExportMenuOpen}
-                  title="Exportar Relatório Técnico de Conformidade SLA"
-                  className="px-2.5 py-1 rounded bg-pm-light-panel dark:bg-pm-dark-panel hover:bg-pm-orange/15 border border-pm-light-border dark:border-pm-dark-border hover:border-pm-orange/50 text-pm-light-text dark:text-pm-dark-text transition-colors flex items-center gap-1.5 font-sans text-xs font-semibold cursor-pointer"
-                >
-                  <Download className="w-3 h-3 text-pm-orange" />
-                  <span>{t.exportReportBtn}</span>
-                  <ChevronDown className="w-3 h-3 opacity-60" />
-                </motion.button>
-
-                {isExportMenuOpen && (
-                  <motion.div 
-                    initial={{ opacity: 0, y: 5 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 5 }}
-                    className="absolute right-0 mt-1 w-48 rounded-md bg-pm-light-surface dark:bg-pm-dark-surface border border-pm-light-border dark:border-pm-dark-border shadow-xl py-1 z-50 font-sans text-xs"
-                  >
-                    <button
-                      onClick={() => handleExportReport('json')}
-                      className="w-full px-3 py-1.5 text-left flex items-center gap-2 hover:bg-pm-light-panelHover dark:hover:bg-pm-dark-panelHover text-pm-light-text dark:text-pm-dark-text transition-colors cursor-pointer"
-                    >
-                      <FileCode className="w-3.5 h-3.5 text-pm-orange" />
-                      <span>{t.exportJson}</span>
-                    </button>
-                    <button
-                      onClick={() => handleExportReport('csv')}
-                      className="w-full px-3 py-1.5 text-left flex items-center gap-2 hover:bg-pm-light-panelHover dark:hover:bg-pm-dark-panelHover text-pm-light-text dark:text-pm-dark-text transition-colors cursor-pointer"
-                    >
-                      <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-500" />
-                      <span>{t.exportCsv}</span>
-                    </button>
-                  </motion.div>
-                )}
-              </div>
-
-            </div>
-          </div>
-
-          {/* Response Viewport Content */}
-          <div className="flex-1 p-3 overflow-y-auto font-mono text-xs">
-            <AnimatePresence mode="wait">
-              
-              {/* ── MODO 1: SINGLE REQUEST RESPONSE ── */}
-              {responseMode === 'single' && (
-                <motion.div
-                  key="single-view"
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -6 }}
-                  transition={{ duration: 0.18, ease: 'easeOut' }}
-                  className="h-full flex flex-col"
-                >
-                  {isSendingSingle ? (
-                    <div className="py-12 text-center space-y-3">
-                      <div className="inline-block w-5 h-5 rounded-full border-2 border-pm-orange border-t-transparent animate-spin" />
-                      <p className="text-pm-orange font-bold text-sm">Disparando requisição individual...</p>
-                      <p className="text-[11px] text-pm-light-textMuted dark:text-pm-dark-textMuted">
-                        Target: {requestUrl}
-                      </p>
-                    </div>
-                  ) : requestError ? (
-                    <div role="alert" className="my-4 rounded border border-rose-500/30 bg-rose-500/10 p-4 text-rose-600 dark:text-rose-300">
-                      <p className="font-semibold">Falha ao obter a resposta</p>
-                      <p className="mt-1 text-xs">{requestError}</p>
-                      <button className="mt-3 font-semibold underline" onClick={() => void handleSendSingle()}>Tentar novamente</button>
-                    </div>
-                  ) : !singleResponse ? (
-                    <div className="py-14 text-center text-pm-light-textMuted dark:text-pm-dark-textMuted space-y-2">
-                      <Send className="w-8 h-8 mx-auto opacity-30 text-pm-orange" />
-                      <p className="font-semibold text-pm-light-text dark:text-pm-dark-text">{t.noSingleResponseYet}</p>
-                      <p className="text-[11px]">{t.clickSendHint}</p>
-                    </div>
-                  ) : (
-                    <>
-                      {singleResponse.errorMessage && <p role="alert" className="mb-3 rounded border border-rose-500/30 bg-rose-500/10 p-3 text-rose-600 dark:text-rose-300">{singleResponse.errorMessage}</p>}
-                      {/* Tab 1: Pretty Body (JSON) com Syntax Highlighting */}
-                      {activeSingleTab === 'body' && (
-                        <div className="h-full flex flex-col rounded bg-pm-light-panel dark:bg-[#151515] border border-pm-light-border dark:border-pm-dark-border overflow-hidden shadow-inner">
-                          <div className="p-2 border-b border-pm-light-border dark:border-white/[0.08] flex items-center justify-between text-[11px] text-pm-light-textMuted dark:text-pm-dark-textMuted bg-pm-light-sidebar dark:bg-pm-dark-panel">
-                            <span className="font-bold flex items-center gap-1.5 text-pm-light-text dark:text-pm-dark-text">
-                              <FileJson className="w-3.5 h-3.5 text-pm-orange" />
-                              RESPONSE PAYLOAD (JSON PRETTY)
-                            </span>
-                            <button
-                              onClick={() => handleCopy(typeof singleResponse.responseBody === 'object' ? JSON.stringify(singleResponse.responseBody, null, 2) : singleResponse.rawBody, 'JSON Payload')}
-                              className="flex items-center gap-1 text-[11px] text-pm-orange hover:underline cursor-pointer font-bold px-2 py-0.5 rounded hover:bg-pm-orange/10 transition-colors"
-                            >
-                              {copied ? <CheckCheck className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                              <span>{copied ? t.copied : t.copyPayload}</span>
-                            </button>
-                          </div>
-                          <div className="flex-1 p-2 overflow-y-auto">
-                            <JsonSyntaxView data={singleResponse.responseBody} raw={singleResponse.rawBody} />
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Tab 2: Test Results com Ícones Animados */}
-                      {activeSingleTab === 'tests' && (
-                        <div className="space-y-2">
-                          <motion.div 
-                            initial={{ opacity: 0, x: -6 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            className="p-3 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border flex items-center justify-between"
-                          >
-                            <div className="flex items-center gap-2">
-                              {singleResponse.statusMatch ? (
-                                <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 text-[10px] font-bold flex items-center gap-1">
-                                  <CheckCircle2 className="w-3 h-3" /> PASS
-                                </span>
-                              ) : (
-                                <span className="px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-500 border border-rose-500/30 text-[10px] font-bold flex items-center gap-1">
-                                  <XCircle className="w-3 h-3" /> FAIL
-                                </span>
-                              )}
-                              <span className="font-semibold text-pm-light-text dark:text-pm-dark-text">
-                                Status code is {singleResponse.expectedStatus}
-                              </span>
-                            </div>
-                            <span className={`font-mono font-bold ${singleResponse.statusMatch ? 'text-emerald-500' : 'text-rose-500'}`}>{singleResponse.actualStatus || 'ERROR'} HTTP</span>
-                          </motion.div>
-
-                          <motion.div 
-                            initial={{ opacity: 0, x: -6 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            transition={{ duration: 0.15, delay: 0.04 }}
-                            className="p-3 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border flex items-center justify-between"
-                          >
-                            <div className="flex items-center gap-2">
-                              {singleResponse.slaPassed ? (
-                                <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 text-[10px] font-bold flex items-center gap-1">
-                                  <CheckCircle2 className="w-3 h-3" /> PASS
-                                </span>
-                              ) : (
-                                <span className="px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-500 border border-rose-500/30 text-[10px] font-bold flex items-center gap-1">
-                                  <XCircle className="w-3 h-3" /> FAIL
-                                </span>
-                              )}
-                              <span className="font-semibold text-pm-light-text dark:text-pm-dark-text">
-                                Response time is within SLA threshold ({singleResponse.maxLatencyMs}ms)
-                              </span>
-                            </div>
-                            <span className={`font-mono font-bold ${singleResponse.slaPassed ? 'text-pm-orange' : 'text-rose-500'}`}>{singleResponse.latencyMs}ms</span>
-                          </motion.div>
-
-                          <motion.div 
-                            initial={{ opacity: 0, x: -6 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            transition={{ delay: 0.1 }}
-                            className="p-3 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border flex items-center justify-between"
-                          >
-                            <div className="flex items-center gap-2">
-                              {!currentCase?.expectedSchema ? (
-                                <span className="px-1.5 py-0.5 rounded bg-pm-light-bg dark:bg-pm-dark-bg text-pm-light-textMuted dark:text-pm-dark-textMuted border border-pm-light-border dark:border-pm-dark-border text-[10px] font-bold">SKIP</span>
-                              ) : singleResponse.schemaValid ? (
-                                <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 text-[10px] font-bold flex items-center gap-1">
-                                  <CheckCircle2 className="w-3 h-3" /> PASS
-                                </span>
-                              ) : (
-                                <span className="px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-500 border border-rose-500/30 text-[10px] font-bold flex items-center gap-1">
-                                  <XCircle className="w-3 h-3" /> FAIL
-                                </span>
-                              )}
-                              <span className="font-semibold text-pm-light-text dark:text-pm-dark-text">
-                                Contract schema integrity verification
-                              </span>
-                            </div>
-                            <span className={`font-mono font-bold ${!currentCase?.expectedSchema ? 'text-pm-light-textMuted dark:text-pm-dark-textMuted' : singleResponse.schemaValid ? 'text-emerald-500' : 'text-rose-500'}`}>
-                              {!currentCase?.expectedSchema ? (language === 'pt' ? 'Não configurado' : 'Not configured') : singleResponse.schemaValid ? '[SCHEMA_VALID]' : '[SCHEMA_INVALID]'}
-                            </span>
-                          </motion.div>
-                        </div>
-                      )}
-
-                      {/* Tab 3: Response Headers */}
-                      {activeSingleTab === 'headers' && (
-                        <div className="rounded bg-pm-light-surface dark:bg-pm-dark-surface border border-pm-light-border dark:border-pm-dark-border overflow-hidden">
-                          <table className="w-full text-left font-mono text-[11px]">
-                            <thead className="bg-pm-light-panel dark:bg-pm-dark-panel border-b border-pm-light-border dark:border-pm-dark-border text-[10px] text-pm-light-textMuted dark:text-pm-dark-textMuted uppercase">
-                              <tr>
-                                <th className="px-4 py-2">{t.headerKey}</th>
-                                <th className="px-4 py-2">{t.headerValue}</th>
-                                <th className="px-4 py-2 text-right">{t.headerAction}</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-pm-light-border dark:divide-pm-dark-border">
-                              {Object.entries(singleResponse.responseHeaders).map(([k, v]) => (
-                                <tr key={k} className="hover:bg-pm-light-panelHover dark:hover:bg-pm-dark-panelHover">
-                                  <td className="px-4 py-2 text-pm-orange font-bold">{k}</td>
-                                  <td className="px-4 py-2 text-pm-light-text dark:text-pm-dark-text truncate max-w-md">{v}</td>
-                                  <td className="px-4 py-2 text-right">
-                                    <button 
-                                      onClick={() => handleCopy(v, k)}
-                                      className="text-[10px] text-pm-light-textMuted dark:text-pm-dark-textMuted hover:text-pm-orange cursor-pointer"
-                                      title="Copiar valor"
-                                    >
-                                      <Copy className="w-3 h-3" />
-                                    </button>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                    </>
-                  )}
-                </motion.div>
-              )}
-
-
-              {/* ── MODO 2: COLLECTION RUNNER STREAM ── */}
-              {responseMode === 'collection' && (
-                <motion.div
-                  key="collection-view"
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -6 }}
-                  transition={{ duration: 0.18, ease: 'easeOut' }}
-                  className="h-full"
-                >
-                  {activeCollectionTab === 'cli' && (
-                    <div className="h-full rounded bg-pm-light-panel dark:bg-[#151515] border border-pm-light-border dark:border-pm-dark-border p-3 text-[11px] text-pm-light-text dark:text-slate-300 overflow-y-auto space-y-1.5 shadow-inner">
-                      <div className="text-pm-light-textMuted dark:text-slate-500 pb-2 border-b border-pm-light-border dark:border-white/[0.08] flex items-center justify-between text-[10px]">
-                        <span>POSTMAN RUNNER PROTOCOL v10.14 ── FASTIFY TEST ENGINE</span>
-                        <span>{new Date().toLocaleDateString('pt-BR')}</span>
-                      </div>
-
-                      {isExecuting ? (
-                        <div className="py-8 text-center space-y-2">
-                          <div className="inline-block w-3 h-3 rounded-full bg-pm-orange animate-ping" />
-                          <p className="text-pm-orange font-bold">Executando bateria sequencial de testes...</p>
-                          <p className="text-[10px] text-pm-light-textMuted dark:text-slate-500">
-                            Disparando asserções, encadeamento dinâmico de JWT e cálculo de percentis p95/p99.
-                          </p>
-                        </div>
-                      ) : !latestRun ? (
-                        <div className="py-12 text-center text-pm-light-textMuted dark:text-slate-500 space-y-1">
-                          <Terminal className="w-8 h-8 mx-auto opacity-30" />
-                          <p>{t.noCollectionRunYet}</p>
-                          <p className="text-[10px]">{t.clickRunCollectionHint}</p>
-                        </div>
-                      ) : (
-                        <motion.div 
-                          initial="hidden"
-                          animate="visible"
-                          variants={{
-                            hidden: { opacity: 0 },
-                            visible: { opacity: 1, transition: { staggerChildren: 0.01 } }
-                          }}
-                          className="space-y-1.5 leading-relaxed"
-                        >
-                          <p className="text-pm-light-textMuted dark:text-slate-500">
-                            [{new Date(latestRun.createdAt).toLocaleTimeString('pt-BR')}] ❯ {latestRun.status}: "{latestRun.suite?.name}" ({latestRun.totalTests} requests)
-                          </p>
-
-                          {latestRun.assertions?.map((ast, idx) => (
-                            <motion.div
-                              key={ast.id}
-                              variants={{
-                                hidden: { opacity: 0, x: -6, y: 3 },
-                                visible: { opacity: 1, x: 0, y: 0, transition: { duration: 0.18 } }
-                              }}
-                              className="flex flex-wrap items-start gap-2 text-[11px]"
-                            >
-                              <span className="text-pm-light-textMuted dark:text-slate-600 w-4 text-right">{idx + 1}.</span>
-                              {assertionPassed(ast) ? (
-                                <span className="text-emerald-500 font-bold">PASS ✔</span>
-                              ) : (
-                                <span className="text-rose-500 font-bold">FAIL ✖</span>
-                              )}
-                              
-                              <span className={`font-bold uppercase ${getMethodTextClass(ast.method)}`}>
-                                [{ast.method}]
-                              </span>
-
-                              <span className="text-pm-light-text dark:text-white font-medium">{ast.endpoint}</span>
-                              <span className="text-pm-light-textMuted dark:text-slate-500">──</span>
-                              <span className={ast.statusMatch ? 'text-emerald-500 font-bold' : 'text-rose-500'}>
-                                {ast.actualStatus} HTTP
-                              </span>
-                              <span className="text-pm-light-textMuted dark:text-slate-500">•</span>
-                              <span className={ast.slaPassed ? 'text-pm-orange' : 'text-amber-500 font-bold'}>
-                                {ast.latencyMs}ms
-                              </span>
-                              
-                              {!ast.schemaValid && <span className="text-rose-500 text-[10px]">[SCHEMA_INVALID]</span>}
-                            </motion.div>
-                          ))}
-
-                          <div className="pt-2 mt-2 border-t border-pm-light-border dark:border-white/[0.08] text-[11px] space-y-0.5">
-                            <p>
-                              ── RESULT: <strong className={latestRun.status === 'PASSED' ? 'text-emerald-500' : 'text-rose-500'}>{latestRun.passedTests}/{latestRun.totalTests} PASSED</strong> • Success Rate: <strong className="text-pm-orange">{latestRun.successRate}%</strong>
-                            </p>
-                            <p className="text-pm-light-textMuted dark:text-slate-400">
-                              ── LATENCY: p95 = <strong className="text-pm-orange">{latestRun.p95LatencyMs}ms</strong> • Total Duration: {latestRun.totalDurationMs}ms
-                            </p>
-                          </div>
-                        </motion.div>
-                      )}
-                    </div>
-                  )}
-
-                  {activeCollectionTab === 'breakdown' && (
-                    <div className="space-y-2">
-                      {latestRun?.assertions?.map((ast) => (
-                        <div
-                          key={ast.id}
-                          className="p-2.5 rounded bg-pm-light-panel dark:bg-pm-dark-panel border border-pm-light-border dark:border-pm-dark-border flex flex-wrap gap-2 items-center justify-between text-xs"
-                        >
-                          <div className="flex flex-wrap items-center gap-2">
-                            {assertionPassed(ast) ? (
-                              <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-500 text-[10px] font-bold border border-emerald-500/30">PASS</span>
-                            ) : (
-                              <span className="px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-500 text-[10px] font-bold border border-rose-500/30">FAIL</span>
-                            )}
-                            <span className={`font-mono text-[10px] font-bold uppercase ${getMethodTextClass(ast.method)}`}>[{ast.method}]</span>
-                            <span className="font-semibold text-pm-light-text dark:text-pm-dark-text">{ast.name}</span>
-                            <span className="text-pm-light-textMuted dark:text-pm-dark-textMuted font-mono text-[11px]">({ast.endpoint})</span>
-                          </div>
-
-                          <div className="flex items-center gap-3 font-mono text-[11px]">
-                            <span className={ast.statusMatch ? 'text-emerald-500 font-bold' : 'text-rose-500 font-bold'}>{ast.actualStatus || 'ERROR'} HTTP</span>
-                            <span className={ast.slaPassed ? 'text-pm-orange' : 'text-rose-500'}>{ast.latencyMs}ms</span>
-                            {!ast.schemaValid && <span className="text-rose-500">Schema FAIL</span>}
-                          </div>
-                          {ast.errorMessage && <p className="w-full text-[11px] text-rose-600 dark:text-rose-300 select-text">{ast.errorMessage}</p>}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </motion.div>
-              )}
-
-            </AnimatePresence>
-          </div>
-
-        </div>
-
-      </div>
-
+      {deleteOpen && storedCase && <ModalShell titleId="delete-request-title" busy={isDeleting} onClose={()=>setDeleteOpen(false)}>
+        <h2 id="delete-request-title" className="text-sm font-semibold">{text('Excluir requisição?', 'Delete request?')}</h2>
+        <p className="mt-3 text-xs leading-relaxed text-pm-light-textMuted dark:text-pm-dark-textMuted">{text(`“${storedCase.name}” será removida, junto com as asserções de histórico associadas.`, `“${storedCase.name}” and its related historical assertions will be removed.`)}</p>
+        {deleteError && <p role="alert" className="mt-3 text-xs text-rose-600 dark:text-rose-400">{deleteError}</p>}
+        <div className="mt-5 flex justify-end gap-2"><button disabled={isDeleting} onClick={()=>setDeleteOpen(false)} className="workbench-button">{t.cancelBtn}</button><button disabled={isDeleting} onClick={()=>void handleDeleteCase()} className="workbench-button !border-rose-500/50 !text-rose-600 dark:!text-rose-400">{isDeleting ? text('Excluindo…','Deleting…') : text('Excluir','Delete')}</button></div>
+      </ModalShell>}
     </div>
   );
-};
+}

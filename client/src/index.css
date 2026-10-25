@@ -54,3 +54,19 @@ button:disabled {
     scroll-behavior: auto !important;
   }
 }
+
+/* Workbench controls share the same compact rhythm across panels. */
+@layer components {
+  .workbench-icon {
+    @apply inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-pm-light-textMuted transition-colors hover:bg-pm-light-panelHover hover:text-pm-light-text disabled:opacity-40 dark:text-pm-dark-textMuted dark:hover:bg-pm-dark-panelHover dark:hover:text-pm-dark-text;
+  }
+  .workbench-button {
+    @apply inline-flex h-8 shrink-0 items-center justify-center gap-2 rounded border border-pm-light-border bg-pm-light-surface px-3 text-xs font-medium text-pm-light-text transition-colors hover:bg-pm-light-panelHover disabled:opacity-40 dark:border-pm-dark-border dark:bg-pm-dark-surface dark:text-pm-dark-text dark:hover:bg-pm-dark-panelHover;
+  }
+  .workbench-table th {
+    @apply border-b border-pm-light-border px-3 py-2 text-[10px] font-medium tracking-wide text-pm-light-textMuted dark:border-pm-dark-border dark:text-pm-dark-textMuted;
+  }
+  .workbench-table td {
+    @apply border-b border-pm-light-borderSubtle px-3 py-2.5 align-top text-pm-light-text dark:border-pm-dark-borderSubtle dark:text-pm-dark-text;
+  }
+}
