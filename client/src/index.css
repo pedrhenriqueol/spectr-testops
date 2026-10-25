@@ -70,3 +70,20 @@ button:disabled {
     @apply border-b border-pm-light-borderSubtle px-3 py-2.5 align-top text-pm-light-text dark:border-pm-dark-borderSubtle dark:text-pm-dark-text;
   }
 }
+
+.auth-input {
+  transition: border-color 180ms ease, box-shadow 220ms ease, background-color 220ms ease;
+}
+.auth-input:hover:not(:disabled) {
+  border-color: color-mix(in srgb, currentColor 28%, transparent);
+}
+.auth-input:focus {
+  border-color: #ff6c37;
+  box-shadow: 0 0 0 3px rgb(255 108 55 / 0.12);
+}
+.auth-ambient {
+  background: radial-gradient(ellipse at center, rgb(255 108 55 / 0.065), transparent 68%);
+}
+.dark .auth-ambient {
+  background: radial-gradient(ellipse at center, rgb(255 108 55 / 0.055), transparent 68%);
+}

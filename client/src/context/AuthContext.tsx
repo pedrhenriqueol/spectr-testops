@@ -24,6 +24,30 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
+export class SessionConfirmationError extends Error {
+  constructor(readonly accountCreated: boolean, cookieRejected: boolean) {
+    const detail = cookieRejected
+      ? 'Não foi possível manter sua sessão. Permita cookies para este site e tente entrar novamente. Se continuar, contate o administrador.'
+      : 'Não foi possível confirmar sua sessão. Verifique a conexão e tente entrar novamente.';
+    super(accountCreated ? `Sua conta foi criada; não é necessário cadastrar novamente. ${detail}` : detail);
+    this.name = 'SessionConfirmationError';
+  }
+}
+
+async function confirmSession(expectedUserId: string, accountCreated: boolean): Promise<SessionResponse> {
+  let session: SessionResponse;
+  try {
+    // A successful POST does not guarantee that the browser accepted Set-Cookie.
+    // Only mount workspace data after a separate cookie-authenticated request.
+    session = (await api.get<SessionResponse>('/auth/me')).data;
+  } catch (failure) {
+    throw new SessionConfirmationError(accountCreated, isAxiosError(failure) && failure.response?.status === 401);
+  }
+  // A rejected replacement cookie can leave a previous account's cookie active.
+  if (session.user?.id !== expectedUserId) throw new SessionConfirmationError(accountCreated, true);
+  return session;
+}
+
 function canChangeContext(): boolean {
   return window.dispatchEvent(new Event('spectr:before-context-change', { cancelable: true }));
 }
@@ -89,7 +113,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const removeHandlers = installApiSessionHandlers({
       getWorkspaceId: () => workspaceRef.current,
       getSessionVersion: () => operationVersion.current,
-      onUnauthenticated: clearSession
+      onUnauthenticated: () => {
+        clearSession();
+        setError('Sua sessão expirou ou foi encerrada. Entre novamente para continuar.');
+      }
     });
     void refresh();
     return () => {
@@ -102,8 +129,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const version = ++operationVersion.current;
     const response = await api.post<SessionResponse>('/auth/login', input);
     if (version !== operationVersion.current) return;
+    const session = await confirmSession(response.data.user.id, false);
+    if (version !== operationVersion.current) return;
     workspaceRef.current = null;
-    applySession(response.data);
+    applySession(session);
     setLoading(false);
   }, [applySession]);
 
@@ -111,8 +140,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const version = ++operationVersion.current;
     const response = await api.post<SessionResponse>('/auth/register', input);
     if (version !== operationVersion.current) return;
+    const session = await confirmSession(response.data.user.id, true);
+    if (version !== operationVersion.current) return;
     workspaceRef.current = null;
-    applySession(response.data);
+    applySession(session);
     setLoading(false);
   }, [applySession]);
 

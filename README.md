@@ -2,7 +2,9 @@
 
 Workbench de testes HTTP inspirado no Postman, com contas de usuário, workspaces isolados, editor de requisições, execução individual ou sequencial, contratos de resposta, métricas de latência e laboratório de caos local.
 
-**Stack:** React 18, TypeScript, Vite, Tailwind CSS, Framer Motion, Fastify 4, Prisma 5 e SQLite. Documentação atualizada em **24/10/2026**.
+**Stack:** React 18, TypeScript, Vite, Tailwind CSS, Framer Motion, Fastify 4, Prisma 5 e SQLite. Documentação atualizada em **25/10/2026**.
+
+[Veja as animações e a demonstração em vídeo](docs/ANIMACOES.md).
 
 ## Desenvolvimento local
 
@@ -31,7 +33,7 @@ npm ci
 npm run dev
 ```
 
-O backend usa a porta **3335**, e o Vite usa **5173**. O cliente acessa `http://localhost:3335/api/v1` por padrão. Use o mesmo hostname nos dois processos durante o desenvolvimento; `localhost` e `127.0.0.1` são destinos distintos para cookies e para a política de origem.
+O backend usa a porta **3335**, e o Vite usa **5173**. O navegador chama `/api/v1` na origem da interface, e o proxy do Vite encaminha ao backend local. Isso mantém o cookie da sessão no próprio site. `CLIENT_URL` precisa corresponder à origem usada para abrir a interface, inclusive hostname e porta.
 
 Abra a interface, selecione **Criar conta** e cadastre nome, e-mail e uma senha de 12 a 128 caracteres. O cadastro já inicia a sessão e cria um workspace próprio. Não existe usuário ou senha padrão.
 
@@ -46,7 +48,9 @@ Abra a interface, selecione **Criar conta** e cadastre nome, e-mail e uma senha 
 | `server/.env` | `SESSION_SAME_SITE` | `lax` por padrão; `none` para uma interface hospedada em outro site |
 | `server/.env` | `SESSION_SECURE` | `true` ou `false`; padrão `true` em produção e `false` nos demais ambientes |
 | `server/.env` | `TARGET_ALLOWED_HOSTS` | Lista opcional de hostnames exatos separados por vírgula; restringe os destinos de saída |
-| `client/.env` | `VITE_API_URL` | Endereço do backend; aceita URL raiz, `/api` ou `/api/v1` |
+| Vite local / função Vercel | `SPECTR_API_URL` | Destino absoluto do proxy; local usa `http://127.0.0.1:3335` por padrão, Vercel exige destino configurado por HTTPS |
+| `client/.env` / Vercel | `VITE_API_URL` | Endereço público do backend para o ambiente Local do executor e destino legado do proxy; aceita URL raiz, `/api` ou `/api/v1` |
+| `client/.env` / build | `VITE_API_TRANSPORT` | Proxy pela mesma origem por padrão; `direct` habilita chamadas diretas a `VITE_API_URL` |
 
 `VITE_API_URL` é lida ao iniciar/buildar o cliente. Variáveis e credenciais de execução não devem ser adicionadas a arquivos versionados. O ambiente pode fornecer `HTTP_PROXY`, `HTTPS_PROXY` e `NO_PROXY`; o cliente HTTP do motor respeita essas configurações.
 
@@ -56,7 +60,11 @@ Se o cache npm padrão não tiver permissão de escrita, use `npm ci --cache /wo
 
 A sessão dura até sete dias e usa o cookie `spectr_session`, com **HttpOnly**, caminho `/api/v1` e **SameSite=Lax** por padrão. O banco armazena o hash do token de sessão; o frontend envia o cookie com `withCredentials` e não o grava em `localStorage`. Logout revoga a sessão atual no servidor.
 
-Frontend e API em portas diferentes do mesmo site funcionam com `lax`, desde que `CLIENT_URL` corresponda à origem da interface. Em produção, sirva a API por HTTPS. Para uma implantação em sites diferentes, configure, por exemplo:
+Na Vercel, mantenha **Root Directory = client** e configure `SPECTR_API_URL` com a URL HTTPS real da API no ambiente de execução. A função em `client/api/v1/[...path].js` preserva o cookie HttpOnly pela origem da interface. O backend usa `CLIENT_URL=https://spectr-testops.vercel.app`, `SESSION_SAME_SITE=lax` e `SESSION_SECURE=true`. O destino legado `VITE_API_URL` absoluto também é aceito pela função. Um novo deploy é necessário após alterar as variáveis.
+
+Depois de cadastrar ou autenticar, a interface confirma a sessão por `auth/me` antes de abrir o workspace. Se o cookie não funcionar, apresenta um erro sem alternar de tela. Um cadastro já concluído retorna ao formulário de entrada, informando que a conta foi criada.
+
+Para uma instalação que precisa de chamadas diretas entre sites diferentes, use `VITE_API_TRANSPORT=direct`, `VITE_API_URL` absoluta no build e, no backend:
 
 ```ini
 # Backend: origem exata da interface, sem wildcard
@@ -66,7 +74,9 @@ SESSION_SAME_SITE=none
 SESSION_SECURE=true
 ```
 
-No build da interface, configure `VITE_API_URL` com o endereço HTTPS real da API. `SameSite=None` exige cookies Secure e não contorna bloqueios de cookies de terceiros do navegador; hospedar frontend e API no mesmo site evita essa dependência.
+`SameSite=None` exige cookies Secure e não contorna bloqueios de cookies de terceiros do navegador. O proxy pela mesma origem evita essa dependência. Em outros hosts estáticos, configure um proxy equivalente ou opte explicitamente pelo transporte direto.
+
+Veja [sessão e configuração da Vercel](docs/SESSAO.md), [persistência do banco](docs/PERSISTENCIA.md) e o [Blueprint do backend com disco](render.yaml). O Blueprint não foi aplicado à infraestrutura. Contas existentes exigem migrar uma cópia consistente do banco atual para o volume; apontar para um arquivo vazio não recupera dados anteriores.
 
 A proteção contra CSRF combina cookies SameSite com verificação de `Origin` nas operações que alteram dados. Origens diferentes de `CLIENT_URL` são rejeitadas. Com `SESSION_SAME_SITE=none`, `Origin` é obrigatório nessas operações, inclusive para clientes HTTP externos. Não há endpoint de token CSRF separado.
 

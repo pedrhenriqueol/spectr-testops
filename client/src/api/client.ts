@@ -9,7 +9,9 @@ export const baseURL = cleanBase.endsWith('/api/v1')
     : `${cleanBase}/api/v1`;
 
 export const api = axios.create({
-  baseURL,
+  // The URL used by the execution engine stays absolute; the browser uses a
+  // first-party cookie through Vite/Vercel's proxy unless explicitly opted out.
+  baseURL: import.meta.env.VITE_API_TRANSPORT === 'direct' ? baseURL : '/api/v1',
   withCredentials: true,
   headers: {
     'Content-Type': 'application/json'

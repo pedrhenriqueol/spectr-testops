@@ -1,0 +1,63 @@
+/* View Transition snapshots reveal the new palette from the theme control. */
+html.spectr-theme-reveal::view-transition,
+html.spectr-theme-reveal::view-transition-group(root) {
+  pointer-events: none;
+}
+
+html.spectr-theme-reveal::view-transition-group(root) {
+  animation: none;
+}
+
+html.spectr-theme-reveal::view-transition-old(root),
+html.spectr-theme-reveal::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+  pointer-events: none;
+}
+
+html.spectr-theme-reveal::view-transition-old(root) {
+  z-index: 1;
+}
+
+html.spectr-theme-reveal::view-transition-new(root) {
+  z-index: 2;
+}
+
+/* Browsers without View Transitions animate palette properties only. */
+html.spectr-theme-colors body,
+html.spectr-theme-colors input,
+html.spectr-theme-colors textarea,
+html.spectr-theme-colors select,
+html.spectr-theme-colors button,
+html.spectr-theme-colors [class*="bg-pm-"],
+html.spectr-theme-colors [class*="text-pm-"],
+html.spectr-theme-colors [class*="border-pm-"] {
+  transition-property: background-color, color, border-color, box-shadow, fill, stroke;
+  transition-duration: 220ms;
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.spectr-theme-colors body,
+  html.spectr-theme-colors input,
+  html.spectr-theme-colors textarea,
+  html.spectr-theme-colors select,
+  html.spectr-theme-colors button,
+  html.spectr-theme-colors [class*="bg-pm-"],
+  html.spectr-theme-colors [class*="text-pm-"],
+  html.spectr-theme-colors [class*="border-pm-"] {
+    transition-duration: 0ms;
+  }
+}
+
+/* Snapshots need the final palette, not a frame from an existing CSS color tween. */
+html.spectr-theme-reveal body,
+html.spectr-theme-reveal input,
+html.spectr-theme-reveal textarea,
+html.spectr-theme-reveal select,
+html.spectr-theme-reveal button,
+html.spectr-theme-reveal [class*="bg-pm-"],
+html.spectr-theme-reveal [class*="text-pm-"],
+html.spectr-theme-reveal [class*="border-pm-"] {
+  transition-property: none !important;
+}

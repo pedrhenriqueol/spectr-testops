@@ -32,7 +32,7 @@ jobs:
       - run: npm test
 
   client:
-    name: Client · typecheck and build
+    name: Client · build, proxy and browser regression
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -47,3 +47,6 @@ jobs:
           cache-dependency-path: client/package-lock.json
       - run: npm ci
       - run: npm run build
+      - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e

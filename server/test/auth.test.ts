@@ -76,6 +76,52 @@ test('login normalizes email and rejects unknown and incorrect credentials consi
   assert.deepEqual(incorrect.json(), absent.json());
 });
 
+test('registration and login cookies keep the workspace startup requests authenticated', async () => {
+  const credentials = { email: `${randomUUID()}@example.test`, password: `Stable-session-${randomUUID()}` };
+  const origin = new URL(env.CLIENT_URL).origin;
+  const registered = await app.inject({
+    method: 'POST', url: '/api/v1/auth/register', remoteAddress: '198.51.100.104', headers: { origin },
+    payload: { ...credentials, name: 'Stable session', workspaceName: 'Session regression' }
+  });
+  assert.equal(registered.statusCode, 201);
+  const registration = registered.json();
+  users.add(registration.user.id); workspaces.add(registration.currentWorkspaceId);
+
+  const assertStartup = async (cookie: string) => {
+    const headers = { cookie, origin, 'x-workspace-id': registration.currentWorkspaceId };
+    for (let round = 0; round < 2; round++) {
+      const responses = await Promise.all(['/api/v1/auth/me', '/api/v1/suites', '/api/v1/runs', '/api/v1/metrics/overview'].map(url =>
+        app.inject({ method: 'GET', url, headers })
+      ));
+      for (const response of responses) {
+        assert.equal(response.statusCode, 200);
+        assert.equal(response.headers['access-control-allow-origin'], origin);
+        assert.equal(response.headers['access-control-allow-credentials'], 'true');
+        assert.match(String(response.headers['cache-control']), /\bno-store\b/);
+        assert.equal(response.headers['set-cookie'], undefined, 'Reading the workspace must not replace or clear its session');
+      }
+      assert.equal(responses[0].json().user.id, registration.user.id);
+      assert.equal(responses[0].json().currentWorkspaceId, registration.currentWorkspaceId);
+    }
+  };
+  await assertStartup(cookieOf(registered));
+
+  const loggedIn = await app.inject({
+    method: 'POST', url: '/api/v1/auth/login', remoteAddress: '198.51.100.105', headers: { origin }, payload: credentials
+  });
+  assert.equal(loggedIn.statusCode, 200);
+  await assertStartup(cookieOf(loggedIn));
+
+  const preflight = await app.inject({
+    method: 'OPTIONS', url: '/api/v1/suites', headers: {
+      origin, 'access-control-request-method': 'GET', 'access-control-request-headers': 'content-type,x-workspace-id'
+    }
+  });
+  assert.equal(preflight.statusCode, 204);
+  assert.equal(preflight.headers['access-control-allow-origin'], origin);
+  assert.equal(preflight.headers['access-control-allow-credentials'], 'true');
+});
+
 test('session expiry and logout revoke access', async () => {
   const expired = await fixture();
   await prisma.session.updateMany({ where: { userId: expired.user.id }, data: { expiresAt: new Date(Date.now() - 1000) } });
