@@ -1,6 +1,6 @@
 # Análise do Spectr TestOps e direção visual
 
-Data: 22/10/2026. Referência funcional e visual: aplicativo Postman. Escopo: frontend, animações/transições, fluxos HTTP, runner, persistência, configuração e dependências do repositório.
+Análise inicial: 22/10/2026. Revisão: 24/10/2026. Referência funcional e visual: aplicativo Postman. Escopo: frontend, animações/transições, fluxos HTTP, runner, persistência, configuração e dependências do repositório.
 
 Esta análise combina leitura do código, builds, testes automatizados, chamadas HTTP locais e inspeção no Chromium. Os critérios de interface seguem padrões do Postman; não foi realizada comparação pixel a pixel com uma versão específica do aplicativo.
 
@@ -10,7 +10,9 @@ A base visual já aproxima o Spectr do Postman: separação entre coleções e w
 
 O principal problema encontrado foi a confiabilidade do feedback: erros de conexão podiam virar respostas de sucesso, o histórico vazio mostrava execuções fictícias e violações de SLA não reprovavam uma coleção. Melhorias visuais precisam preservar a correspondência entre o que a interface apresenta e o que o motor realmente executou.
 
-### Achados e correções desta entrega
+A revisão de 24/10 conclui o redesign, o editor persistente e o acesso multiusuário. Veja [REDESIGN_POSTMAN.md](REDESIGN_POSTMAN.md) e [VALIDACAO.md](VALIDACAO.md) para o estado atual e suas evidências.
+
+### Achados e correções
 
 | Área | Comportamento anterior | Alteração |
 |---|---|---|
@@ -26,6 +28,9 @@ O principal problema encontrado foi a confiabilidade do feedback: erros de conex
 | Responsividade | Ações escapavam do header; sidebar consumia quase toda a largura no celular | Header adapta distribuição; coleções ficam recolhíveis e editor mantém largura útil |
 | Animações | Movimento sem respeitar preferência do sistema | `MotionConfig` e CSS respeitam movimento reduzido; transições curtas |
 | Resultados / exportação | Seleção e relatórios podiam misturar contextos e limites de SLA fictícios | Reseta resposta por contexto, usa dados reais e protege células CSV contra fórmulas |
+| Login e workspaces | API não autenticada e consultas globais | Sessões HttpOnly e verificação de associação ao workspace em cada recurso |
+| Editor | Requisições somente para leitura | Edição de método, URL, parâmetros, headers, body, SLA e contrato; Save/Discard e execução de rascunho |
+| Saída HTTP | Chamadas arbitrárias a redes internas e credenciais em redirects | Validação/pinning de destinos, bloqueio de redes privadas, limite de resposta e headers seguros em mudança de origem |
 | API | Parâmetros frágeis, recursos ausentes como 500, CORS refletindo qualquer origem | Validação centralizada, 400/404 adequados e origem CORS configurada |
 | Seed | Apagava coleções e histórico; incluía senha para serviço externo | Idempotente, local, sem credenciais externas e sem apagar dados |
 | Dependências | Auditoria reportava vulnerabilidade crítica no servidor | Patches compatíveis aplicados sem migração forçada de frameworks |
@@ -34,9 +39,9 @@ O principal problema encontrado foi a confiabilidade do feedback: erros de conex
 
 ### Estrutura e hierarquia
 
-- **Barra global:** marca discreta, navegação entre módulos, ambiente e execução. Priorizar ações essenciais em larguras menores; ações secundárias podem ficar ocultas ou agrupadas.
+- **Barra global:** marca, workspace, busca, idioma e tema em 44 px. A navegação ocupa um rail lateral; ambiente e Run pertencem ao contexto do editor.
 - **Coleções:** lista compacta à esquerda no desktop, método HTTP legível e seleção com contraste. No celular, painel recolhível para preservar espaço de trabalho.
-- **Editor:** método + URL + Send como linha principal; ambiente e limites de teste na linha de contexto; abas para asserções, headers, corpo e contrato.
+- **Editor:** método + URL + Send como linha principal; ambiente na linha de contexto; abas para parâmetros, headers, corpo, testes/SLA e contrato; limites editáveis na aba de testes.
 - **Resposta:** separar conteúdo, headers e resultados de teste. Status, tempo e contagem precisam vir dos dados da execução. Relatórios só ficam disponíveis quando existem resultados.
 - **Estados vazios:** instrução curta e ação concreta para criar coleção, adicionar requisição ou enviar uma chamada. Nunca preencher espaço com telemetria inventada.
 
@@ -46,11 +51,11 @@ A paleta existente em `client/tailwind.config.js` é apropriada: laranja `#FF6C3
 
 Usar tipografia de interface para navegação e textos; monoespaçada para métodos, caminhos, payloads e métricas. Manter bordas de 1px, alinhamento consistente e espaçamento compacto. O foco visível laranja permite navegar sem depender do mouse.
 
-**Próximos refinamentos visuais:** padronizar tamanhos de controles e a escala de espaçamento, consolidar componentes de botão/aba/badge e revisar contraste de textos pequenos nos dois temas. As verificações desta entrega não constituem certificação WCAG.
+**Refinamento aplicado:** controles e espaçamento padronizados, árvore de coleções única e separação de editor/resposta com divisor ajustável. Ainda cabe uma auditoria formal de contraste e acessibilidade. As verificações desta entrega não constituem certificação WCAG.
 
 ### Animações e transições
 
-As entradas de módulos usam transições curtas de opacidade e deslocamento discreto. A troca desmonta a view anterior imediatamente para não depender da conclusão de animações internas e travar a navegação. O indicador de navegação usa mola amortecida. Modais usam entrada leve e os controles têm feedback de hover/press. Os tempos ficam na ordem de 150–200 ms para navegação e diálogo, com preferência por `transform` e `opacity`.
+As entradas de módulos usam transições curtas de opacidade e deslocamento discreto. A troca desmonta a view anterior imediatamente para não depender da conclusão de animações internas e travar a navegação. A navegação usa indicadores discretos e transições de cor. Modais usam entrada leve e os controles têm feedback de hover/press. Os tempos ficam na ordem de 150–200 ms para navegação e diálogo, com preferência por `transform` e `opacity`.
 
 `prefers-reduced-motion` reduz animações CSS e desativa transformações via Framer Motion. Evitar cascatas longas no console com muitas asserções; uma execução grande deve continuar navegável imediatamente. Uma futura otimização deve limitar animações por linha ou virtualizar listas grandes.
 
@@ -69,7 +74,9 @@ flowchart LR
 
 ### Capacidades verificáveis
 
-- CRUD parcial de coleções; criação de casos com método, path, headers, corpo, status, SLA e contrato.
+- Cadastro/login, logout e criação/seleção de workspaces privados.
+- CRUD de casos e edição persistente de método, path, parâmetros, headers, corpo, status, SLA e contrato.
+- Envio do rascunho sem alterar a configuração salva; execução de coleção usa casos salvos.
 - Execução individual com retorno do corpo e headers; execução de coleção com persistência de asserções.
 - Encadeamento de tokens de autenticação entre chamadas na coleção.
 - Cálculo nearest rank de percentis sobre latências por caso.
@@ -80,13 +87,12 @@ flowchart LR
 
 | Prioridade | Limite atual | Próximo passo recomendado |
 |---|---|---|
-| Alta | API sem autenticação/autorização; filtro de workspace não isola usuários | Autenticação e autorização por recurso, testes de acesso cruzado entre workspaces |
-| Alta | Runner aceita destinos HTTP(S) configurados, inclusive rede local | Política de egress por instalação e proteção de destinos/redirects antes de exposição multiusuário |
+| Média | Login e isolamento implementados; convites e recuperação de senha ainda ausentes | Implementar administração de membros e recuperação segura conforme necessidade do produto |
+| Média | A política de saída permite APIs públicas; DNS delegado por proxy exige hostname autorizado | Operador deve configurar destinos confiáveis e política do proxy da instalação |
 | Alta | Credencial de serviço externo existia no código anterior | Rotacionar fora do repositório se ainda válida; remoção desta versão não apaga o histórico Git |
 | Alta | Fastify 4 e toolchain antigo têm advisories sem correção compatível completa | Migrar Fastify/plugins, Vite e Tailwind em entregas separadas com regressão |
 | Média | Requests e coleções executados de forma síncrona | Jobs com estado e limites de concorrência; depois streaming e cancelamento no servidor |
 | Média | Validador é subconjunto de JSON Schema | Adotar validador de especificação completa e fixtures para `$ref`, formatos, composição e erros por caminho |
-| Média | Workbench ainda não oferece edição completa de casos/headers/contratos | Editor persistente com detecção de alterações e validação, mantendo a organização do Postman |
 | Média | Sem importação/exportação de coleções Postman | Compatibilidade Collection v2.1 e importação OpenAPI, com preview antes de persistir |
 | Média | Histórico mutável por cascata e dependente de SQLite local | Política de retenção, backup, auditabilidade e migração de banco se a escala justificar |
 | Média | Endereços Staging são exemplos e ambientes não são CRUD | Ambientes persistentes com variáveis e substituição explícita de `{{variavel}}` |
@@ -116,7 +122,7 @@ Atualizações compatíveis corrigiram `proxy-addr`, `fast-uri`, `follow-redirec
 
 ## 5. Ambiente e evidências
 
-Instalação com lockfiles preservados via `npm ci`, cache em `/workspace/.npm-cache`, Prisma Client gerado com engine normal, schema aplicado e seed repetido para verificar ausência de duplicação. Engines Prisma conferidos com os checksums oficiais por HTTPS, sem desabilitar TLS ou integridade.
+Instalação com lockfiles via `npm ci`, cache em `/workspace/.npm-cache` e Prisma Client com engine normal. A atualização do schema adiciona usuários, sessões e associações sem apagar dados anteriores. O seed é opcional e seus workspaces legados não são atribuídos automaticamente a uma conta nova. Engines Prisma conferidos com os checksums oficiais por HTTPS, sem desabilitar TLS ou integridade.
 
 O ambiente usa Node.js 24 e npm 11; a documentação do projeto admite Node 20 ou superior. Não foram executadas chamadas contra a API PayStream ou outro serviço de aplicação externo.
 
@@ -125,8 +131,8 @@ As verificações e resultados finais desta entrega estão em [VALIDACAO.md](VAL
 ## 6. Ordem recomendada de evolução
 
 1. Manter testes de confiabilidade como critério para qualquer mudança de interface ou motor.
-2. Concluir componentes visuais reutilizáveis e o editor persistente de requisições no padrão Postman.
-3. Implementar autenticação/autorização e política de destinos antes de uso com usuários não confiáveis.
+2. Manter os componentes visuais e o editor persistente com regressão de fluxo e responsividade.
+3. Evoluir convites, recuperação de senha e gestão de membros a partir do login/isolamento implementados.
 4. Migrar dependências principais com os mesmos cenários de regressão.
 5. Adicionar importação Postman/OpenAPI, ambientes persistentes e jobs canceláveis.
 6. Evoluir armazenamento e snapshots de auditoria conforme volume e requisitos reais.

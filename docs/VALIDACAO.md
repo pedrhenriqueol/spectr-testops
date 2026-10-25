@@ -1,66 +1,57 @@
 # Evidências de validação
 
-Data: 22/10/2026. Ambiente: Node.js 24.19.0, npm 11.9.0, SQLite local e Chromium. Os resultados abaixo correspondem à instância atual de desenvolvimento; não comprovam publicação ou restauração em uma nova tarefa na nuvem.
+Revisão: 24/10/2026. Node.js 24, npm 11, Prisma/SQLite e Chromium. Estas verificações pertencem à instância local de desenvolvimento; não afirmam publicação, migração de uma instalação de produção ou restauração de uma nova tarefa na nuvem.
 
-## Builds e testes do backend
+## Build e regressão automatizada
 
-- `server/npm run build`: passou.
-- `server/npm run test:unit`: 2 testes passaram; são um subconjunto dos 16 testes da suíte completa.
-- `server/npm test`: **16 testes passaram**, sem falhas, cancelamentos ou skips. O teste de corpo que não termina atingiu o timeout real de aproximadamente 15 segundos.
-- `client/npm run build`: TypeScript e bundle Vite passaram após os ajustes finais.
-- `git diff --check`: verificado também com os arquivos novos incluídos.
+- Backend: `npm run build` passou.
+- Backend: `npm test` passou com **48/48 testes**, sem falhas, skips ou cancelamentos, em aproximadamente 26 segundos.
+- Frontend: `npm run build` passou, incluindo TypeScript e bundle Vite.
+- Arquivos novos e modificados incluídos na verificação de `git diff --check`.
 
-A suíte automatizada usa SQLite temporário em `/tmp` e servidor HTTP local. Cobre contratos aninhados/booleanos, percentis nearest rank, latência do corpo completo, SLA, timeout, override de ambiente, encadeamento de token, recursos ausentes, entradas inválidas, limites de histórico, filtros de workspace e rotas Chaos. O banco de desenvolvimento é preservado.
+A suíte usa um SQLite temporário exclusivo. Ela cobre autenticação, hash de senha, cookies, expiração/revogação de sessão, origem de requisições, rate limit de login, isolamento por workspace, CRUD de casos, execução de rascunhos sem persistir, SLA, contratos, ordenação, encadeamento de token, percentis e timeout real de 15 segundos.
 
-## Fluxo funcional do servidor
+A política de saída foi exercitada com IPs privados/reservados, resolução DNS, variantes numéricas de loopback, redirects, headers sensíveis, limite de resposta descomprimida de 2 MiB, cancelamento de corpo e DNS e um redirect com corpo aberto que anteriormente podia derrubar o processo. O echo público não devolve cookies ou headers de credenciais.
 
-O roteiro reutilizável de instalação foi executado nesta máquina com `npm ci`, geração normal do Prisma, preparação não destrutiva do arquivo SQLite, aplicação do schema, seed e builds dos dois módulos. O seed foi repetido e manteve **2 coleções e 5 casos**, sendo 4 ativos, sem duplicações.
+## Navegador com backend real
 
-As duas coleções locais foram executadas pela API real: **4/4 casos passaram**. As execuções e suas asserções foram consultadas em `/runs/:id`; health, listagem de coleções e overview de métricas retornaram os dados esperados. Nenhuma chamada de aplicação foi feita contra o PayStream ou outro alvo externo.
+Os roteiros foram executados com a interface e API reais e criaram somente contas, workspaces e coleções temporárias próprias. As fixtures foram removidas por identificador ao terminar; dados anteriores permaneceram preservados. Não foram enviadas requisições de aplicação ao PayStream ou a outros serviços externos.
 
-Os engines Prisma foram conferidos com SHA256 oficial por HTTPS. Não foi desativada a verificação de TLS ou de integridade.
+| Roteiro | Resultado | Comportamentos verificados |
+|---|---|---|
+| Autenticação | **15/15** | Login inválido, cadastro inválido/válido, cookie HttpOnly, ausência de tokens em localStorage, recarregamento, logout, sessão revogada, criação/troca de workspace e veto ao descarte de rascunho |
+| Isolamento e workbench | **13/13** | Duas contas em contextos independentes, negação de leitura/escrita/execução entre contas, seleção de workspace, envio real, abas, divisor e navegação |
+| Editor integrado | **7/7** | Método/URL/headers/body editáveis, envio de draft sem gravar, falha de Save preservando campos, Ctrl+S persistente após reload, JSON inválido bloqueado, Discard, schema booleano inválido, coleção salva/exportação real e exclusão confirmada |
 
-## Navegador
+Os números de cada roteiro são apresentados separadamente; alguns cenários se sobrepõem. Falhas de conexão/POST foram provocadas com interceptação de rede para verificar mensagens e preservação de dados. As execuções normais, asserções, persistência e isolamento usaram SQLite e HTTP reais.
 
-**21 verificações funcionais passaram no Chromium**, sem erros JavaScript não tratados na sequência principal. O roteiro de 19 cenários e os 2 cenários adicionais de indicadores foram executados pelo agente durante esta revisão; o projeto ainda não inclui uma suíte de navegador integrada ao CI.
+Também foram exercitados previamente os componentes isolados do editor e do painel de resposta. Esses checks não substituem as verificações integradas acima. A CI adicionada executa build/testes do backend e build/typecheck do frontend; ela ainda não inclui os roteiros de navegador.
 
-1. Send consulta o backend real e renderiza o JSON da resposta.
-2. Asserções individuais mostram status, SLA e contrato reais.
-3. A troca de ambiente envia `baseUrl` no body ao servidor.
-4. A execução de coleção exibe o resultado persistido.
-5. Exportação JSON contém o identificador real da execução.
-6. Exportação CSV contém as asserções reais.
-7. Uma falha no POST de criação mantém campos preenchidos e mostra o erro.
-8. Tab mantém o foco dentro do modal.
-9. Escape fecha o diálogo e devolve o foco ao botão de origem.
-10. Criação de coleção real seleciona o registro recém-criado.
-11. Criação de endpoint real atualiza a coleção.
-12. Send sem conexão exibe erro, sem resposta HTTP 200 artificial.
-13. Chaos mede atraso pelo backend, sem percentis inventados.
-14. Chaos sem conexão exibe falha, sem simulação fabricada.
-15. Histórico mostra as execuções persistidas.
-16. Troca de idioma atualiza a navegação.
-17. Histórico vazio não cria registros de demonstração.
-18. Falha de carregamento inicial mostra erro e ação de tentar novamente.
-19. A sequência completa não gera exceções JavaScript; inclui a navegação para Chaos após execução, exportações, modais e falha de Send.
-20. Contrato inválido mostra FAIL e `SCHEMA_INVALID`.
-21. Caso sem contrato mostra SKIP, sem afirmar validação inexistente.
+## Revisão visual concluída
 
-As falhas de transporte e o histórico vazio foram provocados por interceptação de rede no navegador para testar esses estados; os envios normais e os cenários de contrato usaram a API e o SQLite reais. Coleções temporárias criadas pelos roteiros foram removidas ao finalizar.
+O workbench foi verificado em **1440×900, 1280×768, 1024×768, 768×900, 390×844 e 360×740**, nos temas claro e escuro: **12 estados responsivos**. Login e seletor de workspace tiveram uma matriz adicional de 16 estados.
 
-A inspeção responsiva em **360, 390, 768, 1024, 1280 e 1440 px** confirmou ausência de overflow horizontal da página e botão Send dentro da área visível. Os temas claro/escuro e a preferência de movimento reduzido foram exercitados. As coleções ficam recolhidas por padrão no celular.
+- Header global com 44 px.
+- Send, Run e navegação dentro da viewport; sem overflow horizontal da página.
+- IDs de controles sem duplicação ao abrir a árvore no celular.
+- Abas com clique, ArrowLeft/Right e Home/End; divisor com mouse e teclado.
+- Resposta com aproximadamente 56,5% da área dos painéis no estado padrão: 457 px em 1440×900, 382 px em 1280×768, 402 px em 390×844 e 343 px em 360×740.
+- Nenhuma exceção JavaScript não tratada nos roteiros aprovados.
 
-## Capturas para revisão visual
+Capturas com dados locais de teste, sem tokens, cookies ou senhas:
 
-Capturas geradas com resposta real do echo local, sem tokens ou credenciais:
+- [Desktop escuro](images/postman-redesign-desktop-dark.png)
+- [Desktop claro](images/postman-redesign-desktop-light.png)
+- [Celular claro](images/postman-redesign-mobile-light.png)
 
-- [Workbench desktop, tema escuro](images/workbench-desktop-dark.png)
-- [Workbench desktop, tema claro](images/workbench-desktop-light.png)
-- [Workbench mobile, tema claro](images/workbench-mobile-light.png)
+A justificativa e a organização dos componentes estão em [REDESIGN_POSTMAN.md](REDESIGN_POSTMAN.md).
 
-## Pendências conhecidas
+## Ambiente, produção e limites
 
-- Auditoria npm: **2 alertas altos no servidor** e **9 no cliente (6 altos, 3 moderados)** após correções compatíveis. As migrações principais estão descritas em [ANALISE_SISTEMA.md](ANALISE_SISTEMA.md).
-- Autenticação/autorização multiusuário, política de destinos, cancelamento no servidor e JSON Schema completo ainda não foram implementados.
-- Não foram feitos testes de carga, certificação WCAG ou comparação pixel a pixel com uma versão específica do Postman.
-- O rascunho do ambiente recebeu `install_script`, `start_skill` e a adição de `binaries.prisma.sh` aos destinos permitidos. A publicação desse ambiente é uma ação do usuário nas configurações; não foi realizada pelo agente.
+O schema Prisma foi atualizado de forma aditiva para usuários, sessões e associações a workspaces, sem apagar dados existentes. Contas novas não recebem posse automática dos workspaces legados. O primeiro acesso exige criar uma conta; não há senha de administrador pré-configurada.
+
+As instruções reutilizáveis de instalação/inicialização foram atualizadas no rascunho do ambiente. A publicação desse ambiente é uma ação do usuário nas configurações, separada do push do código.
+
+Produção requer HTTPS, armazenamento persistente do SQLite, `CLIENT_URL` exata e `VITE_API_URL` correta. Em sites distintos, cookies exigem `SESSION_SAME_SITE=none` e `SESSION_SECURE=true`, além de suporte do navegador a cookies de terceiros; uma implantação no mesmo site evita essa dependência. O proxy de saída pode exigir `TARGET_ALLOWED_HOSTS` e liberação dos destinos na rede da instalação.
+
+Continuam fora desta entrega convites de membros, recuperação de senha, JSON Schema/OpenAPI completo, importação de coleções Postman, filas e cancelamento no servidor. A auditoria anterior apontou dependências principais que exigem migração; não foram aplicadas atualizações forçadas de frameworks. Não foram feitos testes de carga, certificação WCAG nem validação de uma implantação remota de produção.
