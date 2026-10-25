@@ -1,10 +1,12 @@
 import { FastifyInstance } from 'fastify';
 import { prisma } from '../shared/prisma.js';
 import { workspaceQuerySchema } from './schemas.js';
+import { requireRouteWorkspace } from './workspace.js';
 
 export async function metricsRoutes(app: FastifyInstance) {
   app.get('/overview', async (request, reply) => {
-    const { workspaceId } = workspaceQuerySchema.parse(request.query);
+    const { workspaceId } = await requireRouteWorkspace(request);
+    workspaceQuerySchema.parse(request.query);
     const [totalSuites, totalRuns, totalCases, runs] = await Promise.all([
       prisma.testSuite.count({ where: { workspaceId } }),
       prisma.testRun.count({ where: { workspaceId } }),

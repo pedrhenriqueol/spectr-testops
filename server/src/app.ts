@@ -10,16 +10,23 @@ import { suitesRoutes } from './routes/suites.routes.js';
 import { runsRoutes } from './routes/runs.routes.js';
 import { chaosRoutes } from './routes/chaos.routes.js';
 import { metricsRoutes } from './routes/metrics.routes.js';
+import { authRoutes } from './routes/auth.routes.js';
+import { workspacesRoutes } from './routes/workspaces.routes.js';
 
 export function buildApp() {
-  const app = fastify({ logger: env.NODE_ENV === 'development' });
+  const app = fastify({ logger: env.NODE_ENV === 'development' ? { redact: ['req.headers.cookie', 'req.headers.authorization', 'res.headers["set-cookie"]'] } : false });
   app.register(helmet, { contentSecurityPolicy: false });
   app.register(cors, {
-    origin: env.CLIENT_URL,
+    origin: new URL(env.CLIENT_URL).origin,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']
   });
   app.register(rateLimit, { max: 500, timeWindow: '1 minute' });
+  app.addHook('onRequest', async (request, reply) => {
+    if (request.url.startsWith('/api/v1/') && !request.url.startsWith('/api/v1/chaos/')) reply.header('Cache-Control', 'private, no-store');
+  });
+  app.register(authRoutes, { prefix: '/api/v1/auth' });
+  app.register(workspacesRoutes, { prefix: '/api/v1/workspaces' });
   app.register(suitesRoutes, { prefix: '/api/v1/suites' });
   app.register(runsRoutes, { prefix: '/api/v1' });
   app.register(chaosRoutes, { prefix: '/api/v1/chaos' });

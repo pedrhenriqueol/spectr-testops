@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -15,7 +15,9 @@ try {
   if (schema.error) throw schema.error;
   if (schema.status !== 0) process.exitCode = schema.status ?? 1;
   else {
-    const tests = spawnSync(process.execPath, ['--import', 'tsx', '--test', '--test-concurrency=1', 'test/contracts.test.ts', 'test/runner.test.ts', 'test/routes.test.ts'], {
+    const testFiles = readdirSync('test').filter((name) => name.endsWith('.test.ts')).sort().map((name) => `test/${name}`);
+    if (testFiles.length === 0) throw new Error('Nenhum teste de regressão encontrado.');
+    const tests = spawnSync(process.execPath, ['--import', 'tsx', '--test', '--test-concurrency=1', ...testFiles], {
       stdio: 'inherit', env: testEnv
     });
     if (tests.error) throw tests.error;

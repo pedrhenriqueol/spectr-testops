@@ -74,7 +74,10 @@ export async function chaosRoutes(app: FastifyInstance) {
     return reply.status(200).send({
       method: request.method,
       url: request.url,
-      headers: request.headers,
+      // HttpOnly session cookies must never become readable through the public echo.
+      headers: Object.fromEntries(Object.entries(request.headers).filter(([name]) =>
+        !/(?:^|[-_])(cookie|authorization|token|secret|api[-_]?key)(?:$|[-_])/i.test(name)
+      )),
       body: request.body,
       timestamp: new Date().toISOString()
     });

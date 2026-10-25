@@ -1,6 +1,8 @@
 import type { TestCase, TestSuite } from '@prisma/client';
 import { prisma } from '../shared/prisma.js';
 import { AppError } from '../shared/errors/AppError.js';
+import { normalizeCaseOverrides, type CaseExecutionOverrides } from '../shared/test-case.js';
+import { safeFetch } from '../security/safeFetch.js';
 
 import { calculatePercentiles, validateContractSchema } from './contracts.js';
 export { calculatePercentiles, validateContractSchema } from './contracts.js';
@@ -40,12 +42,18 @@ export async function executeTestSuite(
   let passedCount = 0;
   let failedCount = 0;
   let dynamicToken: string | null = null;
+  let tokenOrigin: string | null = null;
 
   try {
     for (const testCase of suite.cases) {
-      const result = await executeRequest(testCase, suite, dynamicToken, baseUrl);
+      const targetOrigin = originOf(resolveUrl(testCase, suite, baseUrl));
+      const scopedToken = targetOrigin && targetOrigin === tokenOrigin ? dynamicToken : null;
+      const result = await executeRequest(testCase, suite, scopedToken, baseUrl);
       const token = tokenFromBody(result.responseBody);
-      if (result.actualStatus >= 200 && result.actualStatus < 300 && token) dynamicToken = token;
+      if (result.actualStatus >= 200 && result.actualStatus < 300 && token) {
+        dynamicToken = token;
+        tokenOrigin = originOf(result.url);
+      }
       latencies.push(result.latencyMs);
       const passed = result.statusMatch && result.slaPassed && result.schemaValid;
       if (passed) passedCount++;
@@ -139,6 +147,10 @@ function tokenFromBody(body: unknown): string | null {
   return null;
 }
 
+function originOf(url: string): string | null {
+  try { return new URL(url).origin; } catch { return null; }
+}
+
 function resolveUrl(testCase: TestCase, suite: TestSuite, baseUrl?: string) {
   return /^https?:\/\//i.test(testCase.path)
     ? testCase.path
@@ -163,7 +175,7 @@ async function executeRequest(
     const method = testCase.method.toUpperCase();
     const body = !['GET', 'HEAD'].includes(method) ? testCase.body ?? undefined : undefined;
     if (body !== undefined && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-    const response = await fetch(url, { method, headers, body, signal: controller.signal });
+    const response = await safeFetch(url, { method, headers, body, signal: controller.signal });
     // The timeout and SLA include the entire response body, not just its headers.
     const rawBody = await response.text();
     const latencyMs = Date.now() - startTime;
@@ -199,7 +211,7 @@ async function executeRequest(
     response.headers.forEach((value, name) => { responseHeaders[name] = value; });
     const sizeBytes = new TextEncoder().encode(rawBody).length;
     return {
-      caseId: testCase.id, name: testCase.name, method, url,
+      caseId: testCase.id, name: testCase.name, method, url: response.url || url,
       actualStatus: response.status, statusText: response.statusText || (response.ok ? 'OK' : 'Error'),
       statusMatch, expectedStatus: testCase.expectedStatus, latencyMs, slaPassed,
       maxLatencyMs: testCase.maxLatencyMs, schemaValid,
@@ -223,10 +235,16 @@ async function executeRequest(
   }
 }
 
-export async function executeSingleTestCase(caseId: string, baseUrl?: string): Promise<SingleCaseResult> {
-  const testCase = await prisma.testCase.findUnique({ where: { id: caseId }, include: { suite: true } });
-  if (!testCase) throw new AppError('Caso de teste não encontrado.', 404);
-  const suite = testCase.suite;
+export async function executeSingleTestCase(
+  caseId: string,
+  baseUrl?: string,
+  overrides?: CaseExecutionOverrides
+): Promise<SingleCaseResult> {
+  const savedCase = await prisma.testCase.findUnique({ where: { id: caseId }, include: { suite: true } });
+  if (!savedCase) throw new AppError('Caso de teste não encontrado.', 404);
+  const suite = savedCase.suite;
+  // Draft edits are scoped to this invocation. The stored request and suite remain untouched.
+  const testCase = { ...savedCase, ...normalizeCaseOverrides(overrides ?? {}) };
   let dynamicToken: string | null = null;
   const isAuthCase = testCase.path.includes('/auth/login') || testCase.path.includes('/login');
   if (!isAuthCase) {
@@ -234,9 +252,12 @@ export async function executeSingleTestCase(caseId: string, baseUrl?: string): P
       where: { suiteId: suite.id, path: { contains: 'login' }, method: 'POST', active: true },
       orderBy: { orderIndex: 'asc' }
     });
-    if (loginCase?.body) {
+    const targetOrigin = originOf(resolveUrl(testCase, suite, baseUrl));
+    if (loginCase?.body && targetOrigin && originOf(resolveUrl(loginCase, suite, baseUrl)) === targetOrigin) {
       const loginResult = await executeRequest(loginCase, suite, null, baseUrl);
-      if (loginResult.actualStatus >= 200 && loginResult.actualStatus < 300) dynamicToken = tokenFromBody(loginResult.responseBody);
+      if (loginResult.actualStatus >= 200 && loginResult.actualStatus < 300 && originOf(loginResult.url) === targetOrigin) {
+        dynamicToken = tokenFromBody(loginResult.responseBody);
+      }
     }
   }
   return executeRequest(testCase, suite, dynamicToken, baseUrl);
